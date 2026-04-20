@@ -31,20 +31,14 @@ from guardian.scenarios.events import (
 if TYPE_CHECKING:  # pragma: no cover
     from guardian.agents.context_agent import ContextSnapshot
     from guardian.agents.intervention_agent import InterventionAgent
+    from guardian.llm.tools import TraceCallback
 
 
 log = logging.getLogger(__name__)
 
 
 def _react_enabled() -> bool:
-    """Gate the ReAct tool loop behind an opt-in env var.
-
-    The default model (``llama3.2:3b``) cannot reliably follow the
-    ``<tool>{...}</tool>`` grammar — it emits XML-attribute-style tags
-    and even hallucinates its own ``<observation>`` blocks. Larger
-    models (qwen2.5:7b, llama3.1:8b) work well, so tool use is opt-in
-    for users with the hardware and patience for them.
-    """
+    """Gate LangChain agent tool use behind an opt-in env var."""
     return os.environ.get("GUARDIAN_REACT", "").strip().lower() in (
         "1",
         "true",
@@ -110,7 +104,7 @@ class RiskAgent:
         *,
         scam_db: ScamDatabase,
         llm: LlmRuntime,
-        intervention: "InterventionAgent",
+        intervention: InterventionAgent,
         event_log: EventLog,
     ) -> None:
         self._db = scam_db
@@ -126,11 +120,21 @@ class RiskAgent:
     def reset(self) -> None:
         self._assessments = []
 
-    def assess(self, snapshot: "ContextSnapshot") -> RiskAssessment:
+    def assess(
+        self,
+        snapshot: ContextSnapshot,
+        trace_callback: TraceCallback | None = None,
+    ) -> RiskAssessment:
         started = time.monotonic()
         fast = self._rule_score(snapshot)
         event = snapshot.triggering_event
         llm_requested = self._should_call_llm(event, fast.score)
+        if trace_callback is not None:
+            trace_callback(
+                "SYSTEM",
+                "Risk assessment started",
+                f"{event.kind.value} event {event.id}",
+            )
 
         trace: list[ToolCallStep] = [
             _meta_trace(
@@ -159,7 +163,11 @@ class RiskAgent:
         if llm_requested:
             try:
                 tools = (
-                    build_default_tool_registry(db=self._db, snapshot=snapshot)
+                    build_default_tool_registry(
+                        db=self._db,
+                        snapshot=snapshot,
+                        trace_callback=trace_callback,
+                    )
                     if _react_enabled()
                     else None
                 )
@@ -168,6 +176,7 @@ class RiskAgent:
                     rule_score=fast.score,
                     rule_contributions=fast.contributions,
                     tools=tools,
+                    trace_callback=trace_callback,
                 )
                 llm_risk = out.risk
                 llm_confidence = out.confidence
@@ -224,6 +233,8 @@ class RiskAgent:
                     source = f"{source}+review"
             except Exception as e:
                 log.warning("[risk] LLM scoring failed: %s", e)
+                if trace_callback is not None:
+                    trace_callback("ERROR", "LLM scoring failed", str(e))
 
         trace.append(
             _meta_trace(
@@ -282,6 +293,12 @@ class RiskAgent:
             source,
         )
         self._intervention.decide(assessment, snapshot)
+        if trace_callback is not None:
+            trace_callback(
+                "FINAL",
+                f"Final risk {assessment.final_risk:.2f}",
+                f"source={assessment.source}, consensus={assessment.consensus}",
+            )
         return assessment
 
     # -- gating --------------------------------------------------------------
@@ -324,7 +341,7 @@ class RiskAgent:
 
     # -- rule scoring --------------------------------------------------------
 
-    def _rule_score(self, s: "ContextSnapshot") -> _RuleResult:
+    def _rule_score(self, s: ContextSnapshot) -> _RuleResult:
         contribs: list[RuleScoreContribution] = []
         reasons: list[str] = []
         event = s.triggering_event

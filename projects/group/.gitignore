@@ -16,3 +16,6 @@ __pycache__/
 /legacy-flutter/app/.dart_tool/
 /legacy-flutter/app/assets/models/
 /legacy-flutter/app/assets/scenarios/
+
+.DS_Store
+DEST

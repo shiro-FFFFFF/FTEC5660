@@ -1,8 +1,8 @@
-"""Ollama HTTP client with optional ReAct tool-calling loop.
+"""Ollama ChatOpenAI runtime adapter.
 
-Port of ``app/lib/llm/ollama_runtime.dart``. Uses the ``/api/chat`` JSON
-endpoint with ``format: json`` when single-shot, and parses the
-``<tool>…</tool>`` / ``<final>…</final>`` grammar when tools are provided.
+Port of ``app/lib/llm/ollama_runtime.dart``. Uses ``langchain-openai``'s
+``ChatOpenAI`` against Ollama's OpenAI-compatible API. Agent structure,
+tools, and structured output live under ``guardian.agents``.
 """
 
 from __future__ import annotations
@@ -10,20 +10,19 @@ from __future__ import annotations
 import json
 import logging
 import os
-import re
-import time
-from dataclasses import dataclass
+import urllib.error
+import urllib.request
 from typing import TYPE_CHECKING, Any
 
-import requests
+from langchain_core.messages import BaseMessage
+from langchain_openai import ChatOpenAI
 
 from guardian.llm.prompts import (
     RISK_SYSTEM_PROMPT,
-    build_react_system_prompt,
     build_risk_prompt,
 )
 from guardian.llm.runtime import LlmRiskOutput, LlmRuntime
-from guardian.llm.tools import ToolCallStep, ToolRegistry, timed_call
+from guardian.llm.tools import ToolCallStep, ToolRegistry, TraceCallback
 
 if TYPE_CHECKING:  # pragma: no cover
     from guardian.agents.context_agent import ContextSnapshot
@@ -57,17 +56,14 @@ WARMUP_TIMEOUT = _env_float("OLLAMA_WARMUP_TIMEOUT", 60.0)
 # Keep the model resident between calls so we don't pay cold-load on every
 # scenario event. Ollama default is 5 minutes.
 KEEP_ALIVE = os.environ.get("OLLAMA_KEEP_ALIVE", "15m")
+API_KEY = os.environ.get("OLLAMA_API_KEY", "ollama")
 
 
-@dataclass
-class _ToolCall:
-    name: str
-    args: dict[str, Any]
-
-
-@dataclass
-class _FinalAnswer:
-    json_obj: dict[str, Any]
+def _openai_base_url(endpoint: str) -> str:
+    endpoint = endpoint.rstrip("/")
+    if endpoint.endswith(("/v1", "/api/v1")):
+        return endpoint
+    return f"{endpoint}/v1"
 
 
 class OllamaLlmRuntime(LlmRuntime):
@@ -75,11 +71,12 @@ class OllamaLlmRuntime(LlmRuntime):
         self,
         model: str = DEFAULT_MODEL,
         endpoint: str = DEFAULT_ENDPOINT,
-        session: requests.Session | None = None,
+        chat_model: ChatOpenAI | None = None,
     ) -> None:
         self.model = model
         self.endpoint = endpoint.rstrip("/")
-        self._session = session or requests.Session()
+        self.base_url = _openai_base_url(endpoint)
+        self._chat_model = chat_model
         self._warm = False
 
     @property
@@ -88,18 +85,19 @@ class OllamaLlmRuntime(LlmRuntime):
 
     @property
     def name(self) -> str:
-        return f"ollama/{self.model}"
+        return f"ollama/{self.model}" if "/" in self.model else self.model
 
     def is_reachable(self, timeout: float = 2.0) -> bool:
         try:
-            r = self._session.get(f"{self.endpoint}/api/tags", timeout=timeout)
-            if r.status_code != 200:
-                return False
-            body = r.json()
-            models = [m.get("name", "") for m in body.get("models", [])]
+            with urllib.request.urlopen(
+                f"{self.base_url}/models",
+                timeout=timeout,
+            ) as response:
+                body = json.loads(response.read().decode("utf-8"))
+            models = [_model_name(m) for m in body.get("data", [])]
             prefix = self.model.split(":")[0]
             return any(m.startswith(prefix) for m in models)
-        except Exception as e:
+        except (OSError, urllib.error.URLError, ValueError) as e:
             log.info("ollama not reachable: %s", e)
             return False
 
@@ -124,36 +122,49 @@ class OllamaLlmRuntime(LlmRuntime):
     def score_risk(
         self,
         *,
-        snapshot: "ContextSnapshot",
+        snapshot: ContextSnapshot,
         rule_score: float,
-        rule_contributions: list["RuleScoreContribution"],
-        tools: "ToolRegistry | None",
+        rule_contributions: list[RuleScoreContribution],
+        tools: ToolRegistry | None,
+        trace_callback: TraceCallback | None = None,
     ) -> LlmRiskOutput:
         if tools is not None:
-            return self._score_risk_react(
+            from guardian.agents.risk_langchain_agent import (
+                score_risk_with_langchain_agent,
+            )
+
+            return score_risk_with_langchain_agent(
+                model=self.chat_model(timeout=DEFAULT_TIMEOUT),
+                model_name=self.name,
                 snapshot=snapshot,
                 rule_score=rule_score,
                 rule_contributions=rule_contributions,
                 tools=tools,
+                trace_callback=trace_callback,
             )
         return self._score_risk_single_shot(
             snapshot=snapshot,
             rule_score=rule_score,
             rule_contributions=rule_contributions,
+            trace_callback=trace_callback,
         )
 
     def _score_risk_single_shot(
         self,
         *,
-        snapshot: "ContextSnapshot",
+        snapshot: ContextSnapshot,
         rule_score: float,
-        rule_contributions: list["RuleScoreContribution"],
+        rule_contributions: list[RuleScoreContribution],
+        trace_callback: TraceCallback | None = None,
     ) -> LlmRiskOutput:
         prompt = build_risk_prompt(
             snapshot=snapshot,
             rule_score=rule_score,
             rule_contributions=rule_contributions,
         )
+        if trace_callback is not None:
+            trace_callback("HUMAN", "Received risk prompt", prompt)
+            trace_callback("THINKING", "Single-shot LLM risk scoring started", None)
         # Single attempt: on timeout the server may still be mid-inference,
         # so a local retry stacks another request on a busy worker and makes
         # things worse. SmartLlmRuntime handles retries across calls via its
@@ -169,112 +180,9 @@ class OllamaLlmRuntime(LlmRuntime):
         parsed = self._extract_json(content)
         if parsed is None:
             raise RuntimeError("Ollama returned invalid JSON")
+        if trace_callback is not None:
+            trace_callback("FINAL", "LLM returned structured risk JSON", content)
         return self._build_output(parsed, rule_score, trace=[])
-
-    def _score_risk_react(
-        self,
-        *,
-        snapshot: "ContextSnapshot",
-        rule_score: float,
-        rule_contributions: list["RuleScoreContribution"],
-        tools: ToolRegistry,
-        max_steps: int = 4,
-    ) -> LlmRiskOutput:
-        system = build_react_system_prompt(tools)
-        user_prompt = build_risk_prompt(
-            snapshot=snapshot,
-            rule_score=rule_score,
-            rule_contributions=rule_contributions,
-        )
-        messages: list[dict[str, str]] = [
-            {"role": "system", "content": system},
-            {"role": "user", "content": user_prompt},
-        ]
-
-        trace: list[ToolCallStep] = []
-        final_json: dict[str, Any] | None = None
-        last_content: str | None = None
-
-        for step in range(max_steps + 1):
-            if final_json is not None:
-                break
-            if step == max_steps:
-                messages.append(
-                    {
-                        "role": "user",
-                        "content": (
-                            "You have reached the tool-call budget. "
-                            "Emit <final>{...}</final> now with your best verdict."
-                        ),
-                    }
-                )
-            try:
-                content = self._chat(messages=messages, timeout=DEFAULT_TIMEOUT)
-            except Exception as e:
-                log.warning("ollama ReAct step %d chat failed: %s", step, e)
-                break
-            last_content = content
-            parsed = self._parse_react_turn(content)
-
-            if isinstance(parsed, _FinalAnswer):
-                final_json = parsed.json_obj
-                break
-
-            if isinstance(parsed, _ToolCall):
-                tool = tools.find(parsed.name)
-                if tool is None:
-                    log.info("[react] step %d: unknown tool '%s'", step, parsed.name)
-                    messages.append({"role": "assistant", "content": content})
-                    messages.append(
-                        {
-                            "role": "user",
-                            "content": (
-                                '<observation>{"error": "unknown tool: '
-                                f'{parsed.name}"}}</observation>'
-                            ),
-                        }
-                    )
-                    continue
-                step_record = timed_call(tool, parsed.args)
-                trace.append(step_record)
-                log.info(
-                    "[react] step %d → %s(%s) → %s (%dms)",
-                    step,
-                    parsed.name,
-                    json.dumps(parsed.args),
-                    json.dumps(step_record.result),
-                    step_record.latency_ms,
-                )
-                messages.append({"role": "assistant", "content": content})
-                messages.append(
-                    {
-                        "role": "user",
-                        "content": f"<observation>{json.dumps(step_record.result)}</observation>",
-                    }
-                )
-                continue
-
-            # Neither tag — try to salvage a JSON verdict, else nudge.
-            salvage = self._extract_json(content)
-            if salvage is not None:
-                final_json = salvage
-                break
-            messages.append({"role": "assistant", "content": content})
-            messages.append(
-                {
-                    "role": "user",
-                    "content": (
-                        "Invalid format. Respond ONLY with <tool>...</tool> or "
-                        "<final>...</final>."
-                    ),
-                }
-            )
-
-        if final_json is None and last_content is not None:
-            final_json = self._extract_json(last_content)
-        if final_json is None:
-            raise RuntimeError("Ollama ReAct loop did not converge on a final answer")
-        return self._build_output(final_json, rule_score, trace=trace)
 
     def _build_output(
         self,
@@ -286,12 +194,20 @@ class OllamaLlmRuntime(LlmRuntime):
         risk = float(parsed.get("risk", rule_score))
         risk = max(0.0, min(1.0, risk))
         tactics_raw = parsed.get("tactics", [])
-        tactics = [t for t in tactics_raw if isinstance(t, str)] if isinstance(tactics_raw, list) else []
+        tactics = (
+            [t for t in tactics_raw if isinstance(t, str)]
+            if isinstance(tactics_raw, list)
+            else []
+        )
         reasons_raw = parsed.get("reasons", [])
-        reasons = [r for r in reasons_raw if isinstance(r, str)] if isinstance(reasons_raw, list) else []
+        reasons = (
+            [r for r in reasons_raw if isinstance(r, str)]
+            if isinstance(reasons_raw, list)
+            else []
+        )
         conf = float(parsed.get("confidence", 0.5))
         conf = max(0.0, min(1.0, conf))
-        source = self.name if not trace else f"{self.name}+react"
+        source = self.name if not trace else f"{self.name}+agent"
         return LlmRiskOutput(
             risk=risk,
             tactics=tactics,
@@ -304,7 +220,7 @@ class OllamaLlmRuntime(LlmRuntime):
     def explain(
         self,
         *,
-        snapshot: "ContextSnapshot",
+        snapshot: ContextSnapshot,
         final_risk: float,
     ) -> str:
         user = (
@@ -341,25 +257,36 @@ class OllamaLlmRuntime(LlmRuntime):
         json_mode: bool = False,
         timeout: float = DEFAULT_TIMEOUT,
     ) -> str:
-        body: dict[str, Any] = {
-            "model": self.model,
-            "messages": messages,
-            "stream": False,
+        response = self._model(timeout=timeout, json_mode=json_mode).invoke(
+            messages,
+        )
+        return _message_content_to_text(response)
+
+    def chat_model(self, *, timeout: float = DEFAULT_TIMEOUT) -> ChatOpenAI:
+        return self._model(timeout=timeout)
+
+    def _model(
+        self,
+        *,
+        timeout: float = DEFAULT_TIMEOUT,
+        json_mode: bool = False,
+    ) -> ChatOpenAI:
+        if self._chat_model is not None:
+            return self._chat_model
+        extra_body: dict[str, Any] = {
             "keep_alive": KEEP_ALIVE,
-            "options": {"temperature": 0.1, "num_ctx": 2048},
+            "options": {"num_ctx": 2048},
         }
         if json_mode:
-            body["format"] = "json"
-        r = self._session.post(
-            f"{self.endpoint}/api/chat",
-            json=body,
+            extra_body["format"] = "json"
+        return ChatOpenAI(
+            model=self.model,
+            base_url=self.base_url,
+            api_key=API_KEY,
             timeout=timeout,
+            temperature=0.1,
+            extra_body=extra_body,
         )
-        if r.status_code != 200:
-            raise RuntimeError(f"ollama http {r.status_code}: {r.text}")
-        decoded = r.json()
-        msg = decoded.get("message") or {}
-        return msg.get("content", "") or ""
 
     @staticmethod
     def _extract_json(raw: str) -> dict[str, Any] | None:
@@ -378,30 +305,38 @@ class OllamaLlmRuntime(LlmRuntime):
                 pass
         return None
 
-    _TOOL_RE = re.compile(r"<tool>\s*(\{[\s\S]*?\})\s*</tool>")
-    _FINAL_RE = re.compile(r"<final>\s*(\{[\s\S]*?\})\s*</final>")
 
-    @classmethod
-    def _parse_react_turn(cls, raw: str) -> _ToolCall | _FinalAnswer | None:
-        m = cls._TOOL_RE.search(raw)
-        if m:
-            try:
-                obj = json.loads(m.group(1))
-            except Exception:
-                return None
-            name = obj.get("name")
-            if not isinstance(name, str) or not name:
-                return None
-            args = obj.get("args") or {}
-            if not isinstance(args, dict):
-                args = {}
-            return _ToolCall(name=name, args=args)
-        m = cls._FINAL_RE.search(raw)
-        if m:
-            try:
-                obj = json.loads(m.group(1))
-            except Exception:
-                return None
-            if isinstance(obj, dict):
-                return _FinalAnswer(json_obj=obj)
-        return None
+def _model_name(model: Any) -> str:
+    name = getattr(model, "id", None) or getattr(model, "name", None)
+    if isinstance(name, str):
+        return name
+    if isinstance(model, dict):
+        raw = model.get("id") or model.get("name") or model.get("key")
+        return raw if isinstance(raw, str) else ""
+    dump = getattr(model, "model_dump", None)
+    if callable(dump):
+        data = dump()
+        raw = data.get("id") or data.get("name") or data.get("key")
+        return raw if isinstance(raw, str) else ""
+    return ""
+
+
+def _message_content_to_text(message: Any) -> str:
+    content = message.content if isinstance(message, BaseMessage) else None
+    if content is None:
+        content = getattr(message, "content", None)
+    if content is None and isinstance(message, dict):
+        content = message.get("content")
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for item in content:
+            if isinstance(item, str):
+                parts.append(item)
+            elif isinstance(item, dict):
+                text = item.get("text") or item.get("content")
+                if isinstance(text, str):
+                    parts.append(text)
+        return "\n".join(parts)
+    return str(content or "")

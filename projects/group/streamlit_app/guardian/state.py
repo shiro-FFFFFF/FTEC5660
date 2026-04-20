@@ -22,13 +22,13 @@ from guardian.agents.bank_account import BankAccount
 from guardian.agents.context_agent import ContextAgent
 from guardian.agents.intervention_agent import InterventionAgent
 from guardian.agents.risk_agent import RiskAgent
-from guardian.agents.user_settings import UserSettingsStore, default_user_settings
+from guardian.agents.user_settings import default_user_settings
 from guardian.data.event_log import EventLog
 from guardian.data.scam_db import ScamDatabase
 from guardian.llm.runtime import SmartLlmRuntime
 from guardian.paths import SCAM_DB_CSV
 from guardian.scenarios.engine import ScenarioEngine
-
+from guardian.ui.live_trace import LiveTraceStore
 
 log = logging.getLogger(__name__)
 
@@ -49,6 +49,7 @@ def _initialize() -> None:
     event_log = EventLog()
     intervention = InterventionAgent()
     llm = SmartLlmRuntime()
+    llm.probe()
     risk = RiskAgent(
         scam_db=scam_db,
         llm=llm,
@@ -59,6 +60,7 @@ def _initialize() -> None:
     bank = BankAccount()
     engine = ScenarioEngine(context=context)
     settings = default_user_settings()
+    live_trace_store = LiveTraceStore()
 
     st.session_state["scam_db"] = scam_db
     st.session_state["event_log"] = event_log
@@ -69,6 +71,7 @@ def _initialize() -> None:
     st.session_state["bank"] = bank
     st.session_state["engine"] = engine
     st.session_state["user_settings"] = settings
+    st.session_state["live_trace_store"] = live_trace_store
     st.session_state[_INIT_KEY] = True
 
 
@@ -79,6 +82,10 @@ def _load_scam_db() -> ScamDatabase:
 
 def _run_ambient_loop() -> None:
     engine: ScenarioEngine = st.session_state["engine"]
+    context: ContextAgent = st.session_state["context"]
+    live_trace_store: LiveTraceStore = st.session_state["live_trace_store"]
+
+    context.trace_callback_factory = lambda event: live_trace_store.make_callback(event.id)
 
     # Honour optional GUARDIAN_AUTOPLAY env var so `just play <id>` works.
     autoplay = os.environ.get("GUARDIAN_AUTOPLAY", "").strip()
@@ -89,7 +96,11 @@ def _run_ambient_loop() -> None:
     # Drive periodic reruns while a scenario is playing OR an intervention
     # modal is waiting for its cool-off timer to tick down.
     intervention: InterventionAgent = st.session_state["intervention"]
-    if engine.is_playing() or intervention.state.pending is not None:
+    if (
+        engine.is_playing()
+        or intervention.state.pending is not None
+        or live_trace_store.has_running()
+    ):
         try:
             from streamlit_autorefresh import st_autorefresh
 

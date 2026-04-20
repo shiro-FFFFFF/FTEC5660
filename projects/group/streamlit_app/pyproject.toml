@@ -10,7 +10,8 @@ requires-python = ">=3.11"
 dependencies = [
   "streamlit>=1.36",
   "streamlit-autorefresh>=1.0.1",
-  "requests>=2.32",
+  "langchain>=1.0",
+  "langchain-openai>=1.0",
   "rich>=13.7",
 ]
 

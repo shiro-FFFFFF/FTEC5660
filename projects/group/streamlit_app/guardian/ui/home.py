@@ -7,7 +7,7 @@ from datetime import datetime
 import streamlit as st
 
 from guardian.scenarios.engine import ScenarioEngine
-from guardian.ui import activity
+from guardian.ui import activity, live_trace
 from guardian.ui.widgets import fmt_hkd, risk_chip
 
 
@@ -15,6 +15,7 @@ def render() -> None:
     engine: ScenarioEngine = st.session_state["engine"]
     risk = st.session_state["risk"]
     event_log = st.session_state["event_log"]
+    live_trace_store = st.session_state["live_trace_store"]
     user_settings = st.session_state["user_settings"].state
 
     _render_header(holder=user_settings.account_holder, risk_agent=risk)
@@ -24,6 +25,8 @@ def render() -> None:
     pending_txn = engine.state.pending_user_transaction
     if pending_txn is not None:
         _render_pending_txn_card(pending_txn)
+
+    live_trace.render(live_trace_store)
 
     _render_quick_links()
 

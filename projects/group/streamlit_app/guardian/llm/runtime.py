@@ -12,19 +12,19 @@ import logging
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:  # pragma: no cover
     from guardian.agents.context_agent import ContextSnapshot
     from guardian.agents.risk_agent import RuleScoreContribution
-    from guardian.llm.tools import ToolCallStep, ToolRegistry
+    from guardian.llm.tools import ToolCallStep, ToolRegistry, TraceCallback
 
 
 log = logging.getLogger(__name__)
 
 
-class PrimaryHealth(str, Enum):
+class PrimaryHealth(StrEnum):
     UNKNOWN = "unknown"       # never probed
     HEALTHY = "healthy"       # last call succeeded
     COOLDOWN = "cooldown"     # recent failure; retry after cooldown expires
@@ -42,7 +42,7 @@ class LlmRiskOutput:
     reasons: list[str]
     confidence: float
     source: str
-    trace: list["ToolCallStep"] = field(default_factory=list)
+    trace: list[ToolCallStep] = field(default_factory=list)
 
 
 class LlmRuntime(ABC):
@@ -50,17 +50,18 @@ class LlmRuntime(ABC):
     def score_risk(
         self,
         *,
-        snapshot: "ContextSnapshot",
+        snapshot: ContextSnapshot,
         rule_score: float,
-        rule_contributions: list["RuleScoreContribution"],
-        tools: "ToolRegistry | None",
+        rule_contributions: list[RuleScoreContribution],
+        tools: ToolRegistry | None,
+        trace_callback: TraceCallback | None = None,
     ) -> LlmRiskOutput: ...
 
     @abstractmethod
     def explain(
         self,
         *,
-        snapshot: "ContextSnapshot",
+        snapshot: ContextSnapshot,
         final_risk: float,
     ) -> str: ...
 
@@ -151,6 +152,24 @@ class SmartLlmRuntime(LlmRuntime):
     def warmup(self) -> None:
         self._probe_and_warmup()
 
+    def probe(self) -> None:
+        """Check primary reachability without forcing a model generation."""
+        primary = self._primary
+        reach = getattr(primary, "is_reachable", None)
+        if not callable(reach):
+            self._record_success()
+            return
+        try:
+            if bool(reach()):
+                self._record_success()
+            else:
+                log.info("[llm] primary not reachable; using %s", self._fallback.name)
+                self._health = PrimaryHealth.UNREACHABLE
+        except Exception as e:
+            log.warning("[llm] reachability check failed: %s", e)
+            self._health = PrimaryHealth.UNREACHABLE
+            self._last_error = str(e)
+
     def force_retry(self) -> None:
         """Clear any cooldown so the next call tries primary again."""
         if self._health is PrimaryHealth.COOLDOWN:
@@ -163,10 +182,11 @@ class SmartLlmRuntime(LlmRuntime):
     def score_risk(
         self,
         *,
-        snapshot: "ContextSnapshot",
+        snapshot: ContextSnapshot,
         rule_score: float,
-        rule_contributions: list["RuleScoreContribution"],
-        tools: "ToolRegistry | None",
+        rule_contributions: list[RuleScoreContribution],
+        tools: ToolRegistry | None,
+        trace_callback: TraceCallback | None = None,
     ) -> LlmRiskOutput:
         if self._use_primary():
             try:
@@ -175,22 +195,26 @@ class SmartLlmRuntime(LlmRuntime):
                     rule_score=rule_score,
                     rule_contributions=rule_contributions,
                     tools=tools,
+                    trace_callback=trace_callback,
                 )
                 self._record_success()
                 return out
             except Exception as e:
                 self._record_failure(f"score_risk: {e}")
+                if trace_callback is not None:
+                    trace_callback("ERROR", "Primary LLM failed", str(e))
         return self._fallback.score_risk(
             snapshot=snapshot,
             rule_score=rule_score,
             rule_contributions=rule_contributions,
             tools=tools,
+            trace_callback=trace_callback,
         )
 
     def explain(
         self,
         *,
-        snapshot: "ContextSnapshot",
+        snapshot: ContextSnapshot,
         final_risk: float,
     ) -> str:
         if self._use_primary():
