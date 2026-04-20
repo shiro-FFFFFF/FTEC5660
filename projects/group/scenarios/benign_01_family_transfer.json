@@ -1,0 +1,28 @@
+{
+  "id": "benign_01_family_transfer",
+  "label": "Legitimate transfer to saved family contact (should NOT friction)",
+  "category": "benign",
+  "expected": {
+    "intervention": "none",
+    "min_risk": 0.0,
+    "max_risk": 0.3
+  },
+  "events": [
+    {
+      "t_seconds": 0,
+      "type": "chat",
+      "contact": "Son (David)",
+      "direction": "incoming",
+      "body": "Mum, can you send me 2000 for next month's rent? Same account as last time. Thanks!"
+    },
+    {
+      "t_seconds": 30,
+      "type": "transaction_attempt",
+      "amount_hkd": 2000,
+      "to_name": "David Wong",
+      "to_account": "012-345678-001",
+      "new_recipient": false,
+      "channel": "saved_payee_transfer"
+    }
+  ]
+}

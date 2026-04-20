@@ -1,0 +1,35 @@
+{
+  "id": "04_urgent_transfer",
+  "label": "Police call + phishing SMS + large transfer to new recipient",
+  "category": "multi_vector",
+  "expected": {
+    "intervention": "full_screen_delay",
+    "min_risk": 0.85,
+    "max_risk": 1.0
+  },
+  "events": [
+    {
+      "t_seconds": 0,
+      "type": "call",
+      "from": "+852 0000 0001",
+      "direction": "incoming",
+      "duration_seconds": 120,
+      "transcript": "This is the Hong Kong Police Cybercrime Unit. Your identity has been used in a mainland fraud case. You must transfer all your funds to a secure holding account now or you will be arrested. Do not disconnect or notify anyone."
+    },
+    {
+      "t_seconds": 45,
+      "type": "sms",
+      "from": "HSBC-Secure",
+      "body": "URGENT: Suspicious login detected. Verify identity at http://hsbc-hk.verify-id.top or account will be frozen."
+    },
+    {
+      "t_seconds": 120,
+      "type": "transaction_attempt",
+      "amount_hkd": 50000,
+      "to_name": "Unknown Ltd",
+      "to_account": "012-345678-999",
+      "new_recipient": true,
+      "channel": "new_payee_transfer"
+    }
+  ]
+}

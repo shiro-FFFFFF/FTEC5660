@@ -1,0 +1,24 @@
+{
+  "id": "01_sms_phishing",
+  "label": "Fake courier SMS with phishing link",
+  "category": "sms_phishing",
+  "expected": {
+    "intervention": "full_screen",
+    "min_risk": 0.7,
+    "max_risk": 1.0
+  },
+  "events": [
+    {
+      "t_seconds": 0,
+      "type": "sms",
+      "from": "HKPOST-Alert",
+      "body": "Your parcel #HK8821 has unpaid customs fee HKD 48. Settle within 24h or it will be returned: http://hkpost-hk.parcel-fee.top/p"
+    },
+    {
+      "t_seconds": 20,
+      "type": "sms",
+      "from": "HKPOST-Alert",
+      "body": "FINAL NOTICE: Parcel will be destroyed. Pay now: http://hkpost-hk.parcel-fee.top/p"
+    }
+  ]
+}

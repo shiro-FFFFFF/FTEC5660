@@ -1,0 +1,124 @@
+# Guardian — Anti-Scam Decision Security Agent
+# CLI task runner. Streamlit is the primary stack; legacy Flutter lives
+# under `legacy-flutter/app/` and is exposed via the `flutter-*` targets.
+
+venv := ".venv"
+python := venv + "/bin/python"
+pip := venv + "/bin/pip"
+streamlit := venv + "/bin/streamlit"
+pytest := venv + "/bin/pytest"
+ruff := venv + "/bin/ruff"
+
+default_model := "gemma3-1b"
+default_flutter_platform := "linux"
+
+export PATH := env_var_or_default("HOME", "/home/white") + "/development/flutter/bin:" + env_var_or_default("HOME", "/home/white") + "/.local/bin:" + env_var("PATH")
+
+# ---------------------------------------------------------------------------
+# Meta
+# ---------------------------------------------------------------------------
+
+default:
+    @just --list
+
+# One-shot setup for the Streamlit stack: virtualenv + deps.
+setup:
+    python3 -m venv {{venv}}
+    {{pip}} install --upgrade pip
+    {{pip}} install -r streamlit_app/requirements.txt
+    {{pip}} install pytest ruff
+    @echo "Setup complete. Run 'just run' to launch Guardian."
+
+# ---------------------------------------------------------------------------
+# Streamlit (primary)
+# ---------------------------------------------------------------------------
+
+# Launch the Streamlit app on http://localhost:8501.
+run:
+    {{streamlit}} run streamlit_app/app.py
+
+# Launch + auto-play a scenario. Example: just play 04_urgent_transfer
+play scenario:
+    GUARDIAN_AUTOPLAY={{scenario}} {{streamlit}} run streamlit_app/app.py
+
+# Headless eval: every scenario through the risk pipeline. Exits non-zero on fail.
+eval:
+    {{python}} streamlit_app/tools/eval.py
+
+# Eval using the Smart runtime (Ollama + heuristic fallback).
+eval-ollama:
+    {{python}} streamlit_app/tools/eval.py --ollama
+
+# Unit tests.
+test:
+    cd streamlit_app && ../{{pytest}} -q
+
+lint:
+    {{ruff}} check streamlit_app
+
+fmt:
+    {{ruff}} format streamlit_app
+
+# List scenarios.
+list-scenarios:
+    @ls scenarios/*.json 2>/dev/null | sed 's|scenarios/||; s|\.json||' || echo "(none)"
+
+# ---------------------------------------------------------------------------
+# Ollama model management (shared between stacks)
+# ---------------------------------------------------------------------------
+
+# Pull a chat model via ollama. Default llama3.2:3b.
+fetch-model model="llama3.2:3b":
+    ollama pull {{model}}
+
+list-models:
+    @ollama list 2>/dev/null || echo "ollama not installed"
+
+# ---------------------------------------------------------------------------
+# Legacy Flutter (preserved under legacy-flutter/app)
+# ---------------------------------------------------------------------------
+
+# Sync scenarios into the Flutter bundle (Flutter needs assets copied).
+flutter-sync-scenarios:
+    mkdir -p legacy-flutter/app/assets/scenarios
+    cp -f scenarios/*.json legacy-flutter/app/assets/scenarios/ 2>/dev/null || true
+    @ls legacy-flutter/app/assets/scenarios/ 2>/dev/null | wc -l | xargs -I{} echo "Synced {} scenario(s)."
+
+flutter-setup: flutter-sync-scenarios
+    cd legacy-flutter/app && flutter pub get
+
+flutter-run platform=default_flutter_platform:
+    cd legacy-flutter/app && flutter run -d {{platform}}
+
+flutter-play scenario platform=default_flutter_platform:
+    cd legacy-flutter/app && flutter run -d {{platform}} --dart-define=AUTOPLAY={{scenario}}
+
+flutter-test:
+    cd legacy-flutter/app && flutter test
+
+flutter-eval:
+    cd legacy-flutter/app && dart run tool/eval.dart
+
+flutter-build-linux:
+    cd legacy-flutter/app && flutter build linux --release
+
+flutter-build-web:
+    cd legacy-flutter/app && flutter build web --release
+
+flutter-build-android:
+    cd legacy-flutter/app && flutter build apk --release
+
+# ---------------------------------------------------------------------------
+# Clean
+# ---------------------------------------------------------------------------
+
+clean:
+    rm -rf {{venv}}
+    rm -rf streamlit_app/**/__pycache__ streamlit_app/.pytest_cache
+    @echo "Cleaned Streamlit virtualenv + caches."
+
+flutter-clean:
+    cd legacy-flutter/app && flutter clean
+    rm -rf legacy-flutter/app/assets/scenarios/*.json
+
+clean-all: clean flutter-clean

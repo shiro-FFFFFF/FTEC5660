@@ -1,0 +1,18 @@
+.venv/
+.windsurf/
+
+# Reports from `just eval`
+/reports/
+
+# Streamlit Python stack
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.streamlit/secrets.toml
+
+# Legacy Flutter build artefacts + downloaded LLM weights (fetched via `just fetch-model`)
+/legacy-flutter/app/build/
+/legacy-flutter/app/.dart_tool/
+/legacy-flutter/app/assets/models/
+/legacy-flutter/app/assets/scenarios/

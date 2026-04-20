@@ -1,0 +1,27 @@
+{
+  "id": "benign_02_utility_bill",
+  "label": "Genuine utility bill SMS followed by small routine payment",
+  "category": "benign",
+  "expected": {
+    "intervention": "none",
+    "min_risk": 0.0,
+    "max_risk": 0.3
+  },
+  "events": [
+    {
+      "t_seconds": 0,
+      "type": "sms",
+      "from": "CLP",
+      "body": "Your electricity bill of HKD 412 is due on 25 Apr. View details at myaccount.clp.com.hk"
+    },
+    {
+      "t_seconds": 60,
+      "type": "transaction_attempt",
+      "amount_hkd": 412,
+      "to_name": "CLP Power HK Ltd",
+      "to_account": "FPS-CLP-HK",
+      "new_recipient": false,
+      "channel": "bill_payment"
+    }
+  ]
+}

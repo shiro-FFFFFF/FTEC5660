@@ -1,0 +1,40 @@
+{
+  "id": "03_romance_investment",
+  "label": "Romance-to-investment (pig butchering) chat escalation",
+  "category": "chat_scam",
+  "expected": {
+    "intervention": "full_screen",
+    "min_risk": 0.65,
+    "max_risk": 1.0
+  },
+  "events": [
+    {
+      "t_seconds": 0,
+      "type": "chat",
+      "contact": "Emily Zhang",
+      "direction": "incoming",
+      "body": "Good morning my dear, did you sleep well? I was thinking about you all night."
+    },
+    {
+      "t_seconds": 30,
+      "type": "chat",
+      "contact": "Emily Zhang",
+      "direction": "incoming",
+      "body": "My uncle works at a private crypto exchange. He gave me a VIP tip, guaranteed 40% return in two weeks. Only close people know."
+    },
+    {
+      "t_seconds": 60,
+      "type": "chat",
+      "contact": "Emily Zhang",
+      "direction": "incoming",
+      "body": "I already put in my savings and made HKD 80,000. I want us to build our future together. You just need to deposit into this wallet: bc1qxy2k...9zqmf. The window closes tonight, hurry."
+    },
+    {
+      "t_seconds": 90,
+      "type": "chat",
+      "contact": "Emily Zhang",
+      "direction": "incoming",
+      "body": "Please don't tell your children, they won't understand our love. Trust me."
+    }
+  ]
+}

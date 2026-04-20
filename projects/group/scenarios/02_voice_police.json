@@ -1,0 +1,20 @@
+{
+  "id": "02_voice_police",
+  "label": "Police impersonation call with money-laundering threat",
+  "category": "voice_call",
+  "expected": {
+    "intervention": "full_screen",
+    "min_risk": 0.7,
+    "max_risk": 1.0
+  },
+  "events": [
+    {
+      "t_seconds": 0,
+      "type": "call",
+      "from": "+852 0000 0000",
+      "direction": "incoming",
+      "duration_seconds": 85,
+      "transcript": "Hello, this is Officer Chan from the Hong Kong Police. Your bank account has been linked to a money-laundering case in Shenzhen. To prove your innocence you must transfer your funds to a secure government holding account immediately. Do not tell anyone including your family as this is a confidential investigation."
+    }
+  ]
+}

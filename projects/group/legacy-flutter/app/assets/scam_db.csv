@@ -1,0 +1,39 @@
+type,value,weight,tag,note
+number,+852 0000 0000,1.0,scamalert_hk,Mass-reported impersonation
+number,+852 0000 0001,1.0,scamalert_hk,Mass-reported impersonation
+number,+852 3111 0000,0.8,scamalert_hk,Suspected fraud hotline
+domain,hsbc-hk.verify-id.top,1.0,phishing,Typosquat of hsbc
+domain,hsbc-hk.verify-parcel.top,1.0,phishing,Typosquat of hsbc
+domain,hkpost-hk.parcel-fee.top,1.0,phishing,Courier phishing
+domain,boc-hk.login-secure.top,1.0,phishing,Typosquat of bochk
+domain,verify-id.top,0.9,phishing,Known phishing TLD cluster
+domain,parcel-fee.top,0.9,phishing,Known phishing TLD cluster
+keyword,arrest,0.6,authority_threat,Urgency + authority
+keyword,police,0.4,authority_impersonation,Self-identifies as police
+keyword,money laundering,0.8,authority_threat,Classic scam script
+keyword,holding account,0.9,authority_threat,Government "safe" account is always a scam
+keyword,urgent,0.3,urgency,Time pressure
+keyword,final notice,0.4,urgency,Pressure to act
+keyword,do not tell,0.7,isolation,Isolation tactic
+keyword,don't tell your,0.7,isolation,Isolation tactic
+keyword,confidential investigation,0.8,authority_impersonation,Scam script
+keyword,guaranteed,0.6,investment_scam,Investment scam lure
+keyword,guaranteed return,0.9,investment_scam,Investment scam lure
+keyword,vip tip,0.8,investment_scam,Insider-info scam lure
+keyword,insider,0.4,investment_scam,Insider-info scam lure
+keyword,crypto,0.2,investment_scam,Crypto-related (weak)
+keyword,wallet,0.2,investment_scam,Crypto wallet mention
+keyword,my dear,0.2,romance,Romance pickup phrase
+keyword,our future together,0.5,romance,Romance scam escalation
+keyword,unpaid customs,0.8,courier_scam,Courier scam script
+keyword,customs fee,0.8,courier_scam,Courier scam script
+keyword,parcel,0.2,courier_scam,Courier scam lure (weak)
+keyword,otp,0.7,credential_theft,OTP solicitation
+keyword,verify identity,0.5,credential_theft,Credential harvest
+keyword,suspicious login,0.4,credential_theft,Bank impersonation
+keyword,account will be frozen,0.6,urgency,Bank impersonation
+keyword,transfer your funds,0.8,payment_redirect,Classic money-mule instruction
+keyword,secure holding,0.9,payment_redirect,"Government holding account" is always scam
+keyword,hurry,0.3,urgency,Time pressure
+keyword,window closes,0.5,urgency,FOMO
+keyword,cybercrime unit,0.7,authority_impersonation,HK Police don't cold-call like this
