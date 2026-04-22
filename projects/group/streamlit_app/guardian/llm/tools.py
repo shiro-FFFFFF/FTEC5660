@@ -199,6 +199,51 @@ def build_default_tool_registry(
                 trace_callback=trace_callback,
                 call=lambda args: _check_beneficiary_for_bank_transfer(provider, args),
             ),
+            _make_tool(
+                name="update_scamdatabase_number",
+                description=(
+                    "Append a newly-detected scam phone number into runtime scam DB. "
+                    "Use only when risk is high and the number is likely a real phone "
+                    "number not already blocklisted. Returns {status}."
+                ),
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "number": {
+                            "type": "string",
+                            "description": "Phone number to append to scam DB.",
+                        },
+                        "risk": {
+                            "type": "number",
+                            "description": "Final risk score in [0,1].",
+                        },
+                        "reason": {
+                            "type": "string",
+                            "description": "Short reason for this update.",
+                        },
+                        "event_id": {
+                            "type": "string",
+                            "description": "Related event id.",
+                        },
+                        "source_model": {
+                            "type": "string",
+                            "description": "Model/source that made the decision.",
+                        },
+                        "weight": {
+                            "type": "number",
+                            "description": "Weight for the appended blocklist row.",
+                        },
+                        "tag": {
+                            "type": "string",
+                            "description": "Tag for the appended blocklist row.",
+                        },
+                    },
+                    "required": ["number", "risk", "reason", "event_id", "source_model"],
+                },
+                trace=trace,
+                trace_callback=trace_callback,
+                call=lambda args: _update_scamdatabase_number(provider, args),
+            ),
         ],
         trace=trace,
     )
@@ -341,6 +386,34 @@ def _check_beneficiary_for_bank_transfer(
     return provider.check_beneficiary_for_bank_transfer(
         recipient_name,
         account_number,
+    )
+
+
+def _update_scamdatabase_number(
+    provider: ScamSignalProvider,
+    args: dict[str, Any],
+) -> dict[str, Any]:
+    number = str(args.get("number", ""))
+    reason = str(args.get("reason", "")).strip() or "high_risk_auto_detected"
+    event_id = str(args.get("event_id", "")).strip() or "unknown_event"
+    source_model = str(args.get("source_model", "")).strip() or "unknown_source"
+    try:
+        risk = float(args.get("risk", 0.0))
+    except (TypeError, ValueError):
+        risk = 0.0
+    try:
+        weight = float(args.get("weight", 0.6))
+    except (TypeError, ValueError):
+        weight = 0.6
+    tag = str(args.get("tag", "auto_detected")).strip() or "auto_detected"
+    return provider.update_scamdatabase_number(
+        number=number,
+        risk=max(0.0, min(1.0, risk)),
+        reason=reason,
+        event_id=event_id,
+        source_model=source_model,
+        weight=max(0.0, min(1.0, weight)),
+        tag=tag,
     )
 
 

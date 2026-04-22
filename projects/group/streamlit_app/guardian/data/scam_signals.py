@@ -10,11 +10,15 @@ into the existing tool/audit tracing.
 from __future__ import annotations
 
 import asyncio
+import csv
 import json
 from abc import ABC, abstractmethod
+from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
-from guardian.data.scam_db import ScamDatabase
+from guardian.data.scam_db import ScamDatabase, ScamEntry, ScamEntryType
+from guardian.paths import SCAM_DB_RUNTIME_CSV
 
 
 class ScamSignalProvider(ABC):
@@ -44,12 +48,26 @@ class ScamSignalProvider(ABC):
         case_id: str | None = None,
     ) -> dict[str, Any]: ...
 
+    @abstractmethod
+    def update_scamdatabase_number(
+        self,
+        *,
+        number: str,
+        risk: float,
+        reason: str,
+        event_id: str,
+        source_model: str,
+        weight: float = 0.6,
+        tag: str = "auto_detected",
+    ) -> dict[str, Any]: ...
+
 
 class ScamDbProvider(ScamSignalProvider):
     """Local provider backed by the in-memory :class:`ScamDatabase`."""
 
-    def __init__(self, db: ScamDatabase) -> None:
+    def __init__(self, db: ScamDatabase, runtime_csv: Path = SCAM_DB_RUNTIME_CSV) -> None:
         self._db = db
+        self._runtime_csv = Path(runtime_csv)
 
     def lookup_number(self, number: str) -> dict[str, Any]:
         raw = (number or "").lower()
@@ -128,6 +146,66 @@ class ScamDbProvider(ScamSignalProvider):
             "fallback": "bank_review_unavailable",
         }
 
+    def update_scamdatabase_number(
+        self,
+        *,
+        number: str,
+        risk: float,
+        reason: str,
+        event_id: str,
+        source_model: str,
+        weight: float = 0.6,
+        tag: str = "auto_detected",
+    ) -> dict[str, Any]:
+        raw_number = (number or "").strip().lower()
+        normalized = _normalize_number_key(raw_number)
+        if not normalized:
+            return {"status": "rejected", "source": "local", "reason": "invalid_number"}
+
+        for entry in self._db.bad_numbers():
+            if _normalize_number_key(entry.value) == normalized:
+                return {
+                    "status": "duplicate",
+                    "source": "local",
+                    "number": entry.value,
+                }
+
+        self._runtime_csv.parent.mkdir(parents=True, exist_ok=True)
+        if not self._runtime_csv.exists():
+            self._runtime_csv.write_text("type,value,weight,tag,note\n", encoding="utf-8")
+
+        note = (
+            f"auto-added {datetime.now(UTC).isoformat()} "
+            f"event={event_id} model={source_model} risk={risk:.3f} reason={reason}"
+        )
+        with self._runtime_csv.open("a", encoding="utf-8", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(
+                [
+                    "number",
+                    raw_number,
+                    f"{max(0.0, min(1.0, float(weight))):.3f}",
+                    tag.strip() or "auto_detected",
+                    note,
+                ]
+            )
+
+        self._db.entries.append(
+            ScamEntry(
+                type=ScamEntryType.NUMBER,
+                value=raw_number,
+                weight=max(0.0, min(1.0, float(weight))),
+                tag=tag.strip() or "auto_detected",
+                note=note,
+            )
+        )
+        return {
+            "status": "accepted",
+            "source": "local",
+            "number": raw_number,
+            "stored_in": str(self._runtime_csv),
+        }
+
 
 class McpScamClient(ScamSignalProvider):
     """MCP client for the scam-signal server over streamable HTTP."""
@@ -171,6 +249,30 @@ class McpScamClient(ScamSignalProvider):
             "source": "mcp",
             "fallback": "not_supported_by_scam_mcp",
         }
+
+    def update_scamdatabase_number(
+        self,
+        *,
+        number: str,
+        risk: float,
+        reason: str,
+        event_id: str,
+        source_model: str,
+        weight: float = 0.6,
+        tag: str = "auto_detected",
+    ) -> dict[str, Any]:
+        return self._call_tool(
+            "update_scamdatabase_number",
+            {
+                "number": number,
+                "risk": risk,
+                "reason": reason,
+                "event_id": event_id,
+                "source_model": source_model,
+                "weight": weight,
+                "tag": tag,
+            },
+        )
 
     def _call_tool(self, tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         return asyncio.run(self._call_tool_async(tool_name, arguments))
@@ -384,6 +486,43 @@ class FallbackProvider(ScamSignalProvider):
                 out["fallback"] = "local"
             return out
 
+    def update_scamdatabase_number(
+        self,
+        *,
+        number: str,
+        risk: float,
+        reason: str,
+        event_id: str,
+        source_model: str,
+        weight: float = 0.6,
+        tag: str = "auto_detected",
+    ) -> dict[str, Any]:
+        try:
+            return self._mcp.update_scamdatabase_number(
+                number=number,
+                risk=risk,
+                reason=reason,
+                event_id=event_id,
+                source_model=source_model,
+                weight=weight,
+                tag=tag,
+            )
+        except Exception:
+            if self._strict:
+                raise
+            out = self._local.update_scamdatabase_number(
+                number=number,
+                risk=risk,
+                reason=reason,
+                event_id=event_id,
+                source_model=source_model,
+                weight=weight,
+                tag=tag,
+            )
+            if isinstance(out, dict):
+                out["fallback"] = "local"
+            return out
+
 
 def _normalize_streamable_http_endpoint(endpoint: str) -> str:
     base = endpoint.strip().rstrip("/")
@@ -414,3 +553,7 @@ def _parse_mcp_tool_result(
                 parsed.setdefault("source", source)
                 return parsed
     raise RuntimeError(f"Unexpected MCP tool result for {tool_name}")
+
+
+def _normalize_number_key(number: str) -> str:
+    return "".join(ch for ch in number if ch.isdigit() or ch == "+")

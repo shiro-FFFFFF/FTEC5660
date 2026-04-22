@@ -3,6 +3,7 @@
 
 # Reports from `just eval`
 /reports/
+/data/scam_db_runtime.csv
 
 # Streamlit Python stack
 __pycache__/

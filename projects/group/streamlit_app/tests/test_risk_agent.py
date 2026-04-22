@@ -16,6 +16,7 @@ from guardian.agents.intervention_agent import InterventionAgent, InterventionLe
 from guardian.agents.risk_agent import RiskAgent
 from guardian.data.event_log import EventLog
 from guardian.data.scam_db import ScamDatabase
+from guardian.data.scam_signals import ScamDbProvider
 from guardian.llm.heuristic import HeuristicLlmRuntime
 from guardian.paths import SCAM_DB_CSV
 from guardian.scenarios.events import (
@@ -139,3 +140,80 @@ def test_intervention_override_clears_pending(pipeline):
     intervention.override_pending()
     assert intervention.state.pending is None
     assert intervention.state.history[-1].overridden is True
+
+
+def test_auto_update_scamdatabase_for_unknown_high_risk_sms(db: ScamDatabase, tmp_path: Path):
+    runtime_csv = tmp_path / "scam_db_runtime.csv"
+    provider = ScamDbProvider(db, runtime_csv=runtime_csv)
+    event_log = EventLog()
+    intervention = InterventionAgent()
+    llm = HeuristicLlmRuntime()
+    risk = RiskAgent(
+        scam_signals=provider,
+        llm=llm,
+        intervention=intervention,
+        event_log=event_log,
+    )
+    context = ContextAgent(event_log=event_log, risk_agent=risk)
+
+    sender = "+852 6123 4567"
+    context.ingest(
+        SmsEvent(
+            id="auto_update_1",
+            timestamp=datetime.now(),
+            from_=sender,
+            body=(
+                "Urgent final notice. Transfer your funds to secure holding account "
+                "now and do not tell your family. "
+                "http://hkpost-hk.parcel-fee.top/p"
+            ),
+        )
+    )
+
+    assert runtime_csv.exists()
+    lines = [line for line in runtime_csv.read_text(encoding="utf-8").splitlines() if line.strip()]
+    assert len(lines) == 2
+    assert sender.lower() in lines[1].lower()
+
+
+def test_auto_update_scamdatabase_skips_duplicate_number(db: ScamDatabase, tmp_path: Path):
+    runtime_csv = tmp_path / "scam_db_runtime.csv"
+    provider = ScamDbProvider(db, runtime_csv=runtime_csv)
+    event_log = EventLog()
+    intervention = InterventionAgent()
+    llm = HeuristicLlmRuntime()
+    risk = RiskAgent(
+        scam_signals=provider,
+        llm=llm,
+        intervention=intervention,
+        event_log=event_log,
+    )
+    context = ContextAgent(event_log=event_log, risk_agent=risk)
+
+    sender = "+852 6123 4568"
+    context.ingest(
+        SmsEvent(
+            id="dup_update_1",
+            timestamp=datetime.now(),
+            from_=sender,
+            body=(
+                "Urgent final notice. Transfer your funds to secure holding account "
+                "now and do not tell your family. "
+                "http://hkpost-hk.parcel-fee.top/p"
+            ),
+        )
+    )
+    context.ingest(
+        SmsEvent(
+            id="dup_update_2",
+            timestamp=datetime.now() + timedelta(seconds=5),
+            from_=sender,
+            body=(
+                "Final notice. Customs fee overdue. Transfer your funds now. "
+                "http://hkpost-hk.parcel-fee.top/p"
+            ),
+        )
+    )
+
+    lines = [line for line in runtime_csv.read_text(encoding="utf-8").splitlines() if line.strip()]
+    assert len(lines) == 2
