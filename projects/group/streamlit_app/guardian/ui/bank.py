@@ -21,13 +21,20 @@ _ASSESSMENT_FUTURE_KEY = "bank_transfer_assessment_future"
 
 
 def render() -> None:
+    assessment_event = st.session_state.get(_ASSESSMENT_EVENT_KEY)
+    assessment_event_id = (
+        assessment_event.id if isinstance(assessment_event, TransactionEvent) else None
+    )
     _finalize_transfer_assessment()
 
     bank: BankAccount = st.session_state["bank"]
     st.title("HSBC Hong Kong")
     _render_balance(bank)
     _render_post_transfer_actions()
-    live_trace.render(st.session_state["live_trace_store"])
+    if assessment_event_id is not None:
+        live_trace.render_event(st.session_state["live_trace_store"], assessment_event_id)
+    else:
+        live_trace.render(st.session_state["live_trace_store"])
 
     tabs = st.tabs(["🔄 Transfer", "🧾 Pay bill", "📜 History"])
     with tabs[0]:

@@ -12,6 +12,7 @@ Every page calls :func:`bootstrap` at the top. It:
 
 from __future__ import annotations
 
+from concurrent.futures import Future
 import logging
 import os
 from typing import Any
@@ -156,9 +157,11 @@ def _run_ambient_loop() -> None:
     # Drive periodic reruns while a scenario is playing OR an intervention
     # modal is waiting for its cool-off timer to tick down.
     intervention: InterventionAgent = st.session_state["intervention"]
+    bank_assessment_running = _bank_transfer_assessment_running()
     if (
         engine.is_playing()
         or intervention.state.pending is not None
+        or bank_assessment_running
         or live_trace_store.has_running()
     ):
         try:
@@ -176,6 +179,11 @@ def _run_ambient_loop() -> None:
     from guardian.ui import intervention as ui_intervention
 
     ui_intervention.render_shared_chrome()
+
+
+def _bank_transfer_assessment_running() -> bool:
+    future = st.session_state.get("bank_transfer_assessment_future")
+    return isinstance(future, Future) and not future.done()
 
 
 def _render_sidebar_footer() -> None:

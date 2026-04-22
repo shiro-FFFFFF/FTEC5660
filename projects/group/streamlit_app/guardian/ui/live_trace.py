@@ -69,6 +69,11 @@ class LiveTraceStore:
         with self._lock:
             return any(trace.get("status") == "running" for trace in self._traces.values())
 
+    def get(self, event_id: str) -> dict[str, Any] | None:
+        with self._lock:
+            trace = self._traces.get(event_id)
+            return dict(trace) if trace is not None else None
+
     def prune_completed(self) -> None:
         with self._lock:
             self._traces = {
@@ -92,6 +97,23 @@ def render(store: LiveTraceStore) -> None:
             for row in rows:
                 _render_row(row)
     store.prune_completed()
+
+
+def render_event(store: LiveTraceStore, event_id: str) -> None:
+    trace = store.get(event_id)
+    if trace is None:
+        return
+
+    rows = list(trace.get("rows", []))
+    if not rows:
+        return
+
+    status = str(trace.get("status", "running"))
+    label = f"{event_id} · {len(rows)} step(s) · {status}"
+    st.subheader("Transfer review trace")
+    with st.expander(label, expanded=True):
+        for row in rows:
+            _render_row(row)
 
 
 def _render_row(row: dict[str, Any]) -> None:
