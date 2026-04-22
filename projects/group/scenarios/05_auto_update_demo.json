@@ -1,0 +1,24 @@
+{
+  "id": "05_auto_update_demo",
+  "label": "Auto update scam DB demo",
+  "category": "sms_phishing",
+  "expected": {
+    "intervention": "full_screen",
+    "min_risk": 0.9,
+    "max_risk": 1.0
+  },
+  "events": [
+    {
+      "t_seconds": 0,
+      "type": "sms",
+      "from": "+852 6123 4567",
+      "body": "URGENT final notice. Transfer your funds to secure holding account now. Do not tell your family. Pay customs fee now: http://hkpost-hk.parcel-fee.top/p"
+    },
+    {
+      "t_seconds": 15,
+      "type": "sms",
+      "from": "+852 6123 4567",
+      "body": "hello"
+    }
+  ]
+}

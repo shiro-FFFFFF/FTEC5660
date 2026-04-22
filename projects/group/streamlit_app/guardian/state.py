@@ -34,7 +34,7 @@ from guardian.data.scam_signals import (
     ScamSignalProvider,
 )
 from guardian.llm.runtime import SmartLlmRuntime
-from guardian.paths import SCAM_DB_CSV
+from guardian.paths import SCAM_DB_CSV, SCAM_DB_RUNTIME_CSV
 from guardian.scenarios.engine import ScenarioEngine
 from guardian.ui.live_trace import LiveTraceStore
 
@@ -87,7 +87,13 @@ def _initialize() -> None:
 
 @st.cache_resource
 def _load_scam_db() -> ScamDatabase:
-    return ScamDatabase.from_csv(SCAM_DB_CSV.read_text(encoding="utf-8"))
+    base_raw = SCAM_DB_CSV.read_text(encoding="utf-8")
+    runtime_raw = (
+        SCAM_DB_RUNTIME_CSV.read_text(encoding="utf-8")
+        if SCAM_DB_RUNTIME_CSV.exists()
+        else ""
+    )
+    return ScamDatabase.from_csvs(base_raw, runtime_raw)
 
 
 def _build_scam_signal_provider(scam_db: ScamDatabase) -> ScamSignalProvider:

@@ -14,6 +14,7 @@ REPO_ROOT: Path = Path(__file__).resolve().parents[2]
 
 DATA_DIR: Path = REPO_ROOT / "data"
 SCAM_DB_CSV: Path = DATA_DIR / "scam_db.csv"
+SCAM_DB_RUNTIME_CSV: Path = DATA_DIR / "scam_db_runtime.csv"
 
 SCENARIOS_DIR: Path = REPO_ROOT / "scenarios"
 

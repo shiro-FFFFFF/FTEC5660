@@ -311,6 +311,11 @@ class RiskAgent:
             risk=assessment.final_risk,
             tags=list(assessment.tactics),
         )
+        self._maybe_update_scamdatabase_number(
+            event=event,
+            assessment=assessment,
+            trace_callback=trace_callback,
+        )
         log.info(
             "[risk] %s/%s fast=%.2f llm=%s review=%s final=%.2f [%s] (%dms, %s)",
             event.kind.value,
@@ -331,6 +336,71 @@ class RiskAgent:
                 f"source={assessment.source}, consensus={assessment.consensus}",
             )
         return assessment
+
+    def _maybe_update_scamdatabase_number(
+        self,
+        *,
+        event: ScamEvent,
+        assessment: RiskAssessment,
+        trace_callback: TraceCallback | None,
+    ) -> None:
+        """Auto-append unknown high-risk phone senders into runtime scam DB."""
+        if not isinstance(event, (CallEvent, SmsEvent)):
+            return
+        if assessment.final_risk < 0.9:
+            return
+        if assessment.consensus == "conflict":
+            return
+
+        sender = event.from_.strip()
+        normalized_sender = _normalize_phone_like(sender)
+        if not normalized_sender:
+            return
+
+        try:
+            lookup = self._signals.lookup_number(sender)
+        except Exception as e:
+            log.warning("[risk] lookup before runtime update failed: %s", e)
+            return
+        if bool(lookup.get("hit")):
+            return
+
+        reason = (
+            assessment.reasons[0]
+            if assessment.reasons
+            else "high_risk_auto_detected"
+        )
+        try:
+            out = self._signals.update_scamdatabase_number(
+                number=sender,
+                risk=assessment.final_risk,
+                reason=reason[:240],
+                event_id=assessment.event_id,
+                source_model=assessment.source,
+                weight=max(0.6, min(0.95, assessment.final_risk)),
+                tag="auto_detected",
+            )
+            status = str(out.get("status", "unknown"))
+            log.info(
+                "[risk] runtime scam-db update %s for sender=%s event=%s",
+                status,
+                sender,
+                assessment.event_id,
+            )
+            if trace_callback is not None:
+                trace_callback(
+                    "SYSTEM",
+                    "Runtime scam DB update attempted",
+                    f"sender={sender} status={status}",
+                )
+        except Exception as e:
+            log.warning("[risk] runtime scam-db update failed: %s", e)
+            if trace_callback is not None:
+                trace_callback(
+                    "ERROR",
+                    "Runtime scam DB update failed",
+                    str(e),
+                )
 
     # -- gating --------------------------------------------------------------
 
@@ -638,3 +708,16 @@ def _meta_trace(
     latency_ms: int = 0,
 ) -> ToolCallStep:
     return ToolCallStep(tool=tool, args=args, result=result, latency_ms=latency_ms)
+
+
+def _normalize_phone_like(raw: str) -> str:
+    value = (raw or "").strip()
+    if not value:
+        return ""
+    normalized = "".join(ch for ch in value if ch.isdigit() or ch == "+")
+    digit_count = sum(ch.isdigit() for ch in normalized)
+    if digit_count < 7:
+        return ""
+    if any(ch.isalpha() for ch in value):
+        return ""
+    return normalized
