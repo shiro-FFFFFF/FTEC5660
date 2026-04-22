@@ -14,8 +14,6 @@ import json
 from abc import ABC, abstractmethod
 from typing import Any
 
-import requests
-
 from guardian.data.scam_db import ScamDatabase
 
 
@@ -132,39 +130,20 @@ class ScamDbProvider(ScamSignalProvider):
 
 
 class McpScamClient(ScamSignalProvider):
-    """HTTP client for the mock MCP scam-signal service."""
+    """MCP client for the scam-signal server over streamable HTTP."""
 
     def __init__(self, endpoint: str, *, timeout_s: float = 3.0) -> None:
-        self.endpoint = endpoint.rstrip("/")
+        self.endpoint = _normalize_streamable_http_endpoint(endpoint)
         self.timeout_s = timeout_s
 
-    def _post(self, route: str, payload: dict[str, Any]) -> dict[str, Any]:
-        resp = requests.post(
-            f"{self.endpoint}/{route}",
-            json=payload,
-            timeout=self.timeout_s,
-        )
-        resp.raise_for_status()
-        out = resp.json()
-        if isinstance(out, dict):
-            out.setdefault("source", "mcp")
-        return out
-
-    def health(self) -> bool:
-        try:
-            resp = requests.get(f"{self.endpoint}/health", timeout=self.timeout_s)
-            return resp.status_code == 200
-        except Exception:
-            return False
-
     def lookup_number(self, number: str) -> dict[str, Any]:
-        return self._post("lookup_number", {"number": number})
+        return self._call_tool("lookup_number", {"number": number})
 
     def check_domain(self, text: str) -> dict[str, Any]:
-        return self._post("check_domain", {"text": text})
+        return self._call_tool("check_domain", {"text": text})
 
     def search_keywords(self, text: str) -> dict[str, Any]:
-        return self._post("search_keywords", {"text": text})
+        return self._call_tool("search_keywords", {"text": text})
 
     def check_beneficiary_for_bank_transfer(
         self,
@@ -193,12 +172,44 @@ class McpScamClient(ScamSignalProvider):
             "fallback": "not_supported_by_scam_mcp",
         }
 
+    def _call_tool(self, tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+        return asyncio.run(self._call_tool_async(tool_name, arguments))
+
+    async def _call_tool_async(
+        self,
+        tool_name: str,
+        arguments: dict[str, Any],
+    ) -> dict[str, Any]:
+        from mcp import ClientSession
+        from mcp.client.streamable_http import streamable_http_client
+
+        async with streamable_http_client(self.endpoint) as (
+            read_stream,
+            write_stream,
+            _,
+        ):
+            async with ClientSession(read_stream, write_stream) as session:
+                await asyncio.wait_for(session.initialize(), timeout=self.timeout_s)
+                result = await asyncio.wait_for(
+                    session.call_tool(
+                        tool_name,
+                        arguments={k: v for k, v in arguments.items() if v is not None},
+                    ),
+                    timeout=self.timeout_s,
+                )
+                return _parse_mcp_tool_result(
+                    result=result,
+                    source="mcp",
+                    tool_name=tool_name,
+                )
+
 
 class McpBankReviewClient:
     """MCP client for the bank transfer beneficiary review server."""
 
-    def __init__(self, endpoint: str) -> None:
-        self.endpoint = endpoint.rstrip("/")
+    def __init__(self, endpoint: str, *, timeout_s: float = 5.0) -> None:
+        self.endpoint = _normalize_streamable_http_endpoint(endpoint)
+        self.timeout_s = timeout_s
 
     def check_beneficiary_for_bank_transfer(
         self,
@@ -248,25 +259,19 @@ class McpBankReviewClient:
             _,
         ):
             async with ClientSession(read_stream, write_stream) as session:
-                await session.initialize()
-                result = await session.call_tool(
-                    tool_name,
-                    arguments={k: v for k, v in arguments.items() if v is not None},
+                await asyncio.wait_for(session.initialize(), timeout=self.timeout_s)
+                result = await asyncio.wait_for(
+                    session.call_tool(
+                        tool_name,
+                        arguments={k: v for k, v in arguments.items() if v is not None},
+                    ),
+                    timeout=self.timeout_s,
                 )
-                structured = getattr(result, "structuredContent", None)
-                if isinstance(structured, dict):
-                    structured.setdefault("source", "bank_review_mcp")
-                    return structured
-
-                content = getattr(result, "content", None)
-                if isinstance(content, list) and content:
-                    text = getattr(content[0], "text", None)
-                    if isinstance(text, str):
-                        parsed = json.loads(text)
-                        if isinstance(parsed, dict):
-                            parsed.setdefault("source", "bank_review_mcp")
-                            return parsed
-                raise RuntimeError(f"Unexpected MCP tool result for {tool_name}")
+                return _parse_mcp_tool_result(
+                    result=result,
+                    source="bank_review_mcp",
+                    tool_name=tool_name,
+                )
 
 
 class FallbackProvider(ScamSignalProvider):
@@ -378,3 +383,34 @@ class FallbackProvider(ScamSignalProvider):
             if isinstance(out, dict):
                 out["fallback"] = "local"
             return out
+
+
+def _normalize_streamable_http_endpoint(endpoint: str) -> str:
+    base = endpoint.strip().rstrip("/")
+    if not base:
+        return base
+    if base.endswith("/mcp"):
+        return base
+    return f"{base}/mcp"
+
+
+def _parse_mcp_tool_result(
+    *,
+    result: Any,
+    source: str,
+    tool_name: str,
+) -> dict[str, Any]:
+    structured = getattr(result, "structuredContent", None)
+    if isinstance(structured, dict):
+        structured.setdefault("source", source)
+        return structured
+
+    content = getattr(result, "content", None)
+    if isinstance(content, list) and content:
+        text = getattr(content[0], "text", None)
+        if isinstance(text, str):
+            parsed = json.loads(text)
+            if isinstance(parsed, dict):
+                parsed.setdefault("source", source)
+                return parsed
+    raise RuntimeError(f"Unexpected MCP tool result for {tool_name}")
