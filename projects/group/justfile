@@ -44,12 +44,14 @@ run:
 run-with-bank-mcp endpoint="http://127.0.0.1:8766/mcp":
     GUARDIAN_BANK_REVIEW_MCP_ENDPOINT={{endpoint}} {{streamlit}} run streamlit_app/app.py
 
-# Launch the legacy scam-signal mock MCP bridge (HTTP) on http://127.0.0.1:<port>.
+# Launch the scam-signal MCP server over streamable HTTP.
+# Clients should point GUARDIAN_MCP_ENDPOINT to:
+# http://127.0.0.1:<port>/mcp
 # Examples:
 # - just mcp
 # - just mcp 8765
 mcp port="8765":
-    cd streamlit_app && ../{{python}} -m uvicorn mcp_server.server:app --reload --host 127.0.0.1 --port {{port}}
+    cd streamlit_app && GUARDIAN_MCP_ENDPOINT=http://127.0.0.1:{{port}}/mcp ../{{python}} -m mcp_server.server --transport streamable-http --host 127.0.0.1 --port {{port}}
 
 # Launch the BANK TRANSFER REVIEW MCP server over streamable HTTP.
 # Clients should point GUARDIAN_BANK_REVIEW_MCP_ENDPOINT to:

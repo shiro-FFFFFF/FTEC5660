@@ -94,7 +94,8 @@ def _build_scam_signal_provider(scam_db: ScamDatabase) -> ScamSignalProvider:
     """Create the scam-signal provider.
 
     Env vars:
-    - GUARDIAN_MCP_ENDPOINT: base URL of the HTTP service (e.g. http://127.0.0.1:8765)
+    - GUARDIAN_MCP_ENDPOINT: streamable HTTP MCP endpoint
+      (e.g. http://127.0.0.1:8765/mcp)
     - GUARDIAN_MCP_TIMEOUT_S: request timeout in seconds (default 3.0)
     - GUARDIAN_MCP_ENABLED: optional toggle (1/true/yes/on to enable)
     - GUARDIAN_BANK_REVIEW_MCP_ENDPOINT: streamable HTTP MCP endpoint
