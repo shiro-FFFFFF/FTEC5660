@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -89,6 +90,7 @@ class ScenarioEngine:
         self._started_wall: datetime | None = None
         self._fired: set[int] = set()
         self._completed_at: float | None = None
+        self._effective_offsets_seconds: dict[int, float] = {}
 
     # -- state accessors -----------------------------------------------------
 
@@ -139,6 +141,7 @@ class ScenarioEngine:
         self._started_wall = datetime.now()
         self._fired = set()
         self._completed_at = None
+        self._effective_offsets_seconds = _build_effective_offsets_seconds(scenario.events)
         log.info("[scenario] ▶ %s — %s", scenario.id, scenario.label)
 
     def poll(self) -> None:
@@ -147,6 +150,7 @@ class ScenarioEngine:
         if scenario is None or self._started_monotonic is None or self._started_wall is None:
             return
         elapsed = time.monotonic() - self._started_monotonic
+        effective_total_seconds = max(self._effective_offsets_seconds.values(), default=0.0)
         total_seconds = max(
             (e.offset.total_seconds() for e in scenario.events),
             default=0.0,
@@ -154,7 +158,11 @@ class ScenarioEngine:
         for scheduled in scenario.events:
             if scheduled.index in self._fired:
                 continue
-            if scheduled.offset.total_seconds() > elapsed:
+            effective_offset_seconds = self._effective_offsets_seconds.get(
+                scheduled.index,
+                scheduled.offset.total_seconds(),
+            )
+            if effective_offset_seconds > elapsed:
                 continue
             self._fired.add(scheduled.index)
             ts = self._started_wall + scheduled.offset
@@ -181,8 +189,8 @@ class ScenarioEngine:
                 )
                 self._context.ingest(event)
             progress = (
-                (scheduled.offset.total_seconds() + 1) / (total_seconds + 1)
-                if total_seconds
+                (effective_offset_seconds + 1) / (effective_total_seconds + 1)
+                if effective_total_seconds
                 else 1.0
             )
             self._state = ScenarioState(
@@ -234,6 +242,7 @@ class ScenarioEngine:
             )
             self._started_monotonic = None
             self._started_wall = None
+            self._effective_offsets_seconds = {}
 
     def stop(self) -> None:
         self._state = ScenarioState(completed=self._state.completed)
@@ -241,3 +250,33 @@ class ScenarioEngine:
         self._started_wall = None
         self._fired = set()
         self._completed_at = None
+        self._effective_offsets_seconds = {}
+
+
+def _build_effective_offsets_seconds(events: list[ScheduledEvent]) -> dict[int, float]:
+    max_idle_s = _scenario_max_idle_s()
+    if max_idle_s is None:
+        return {event.index: event.offset.total_seconds() for event in events}
+
+    effective_offsets: dict[int, float] = {}
+    previous_actual = 0.0
+    previous_effective = 0.0
+    for event in events:
+        actual = event.offset.total_seconds()
+        gap = max(0.0, actual - previous_actual)
+        effective_gap = min(gap, max_idle_s)
+        previous_effective += effective_gap
+        effective_offsets[event.index] = previous_effective
+        previous_actual = actual
+    return effective_offsets
+
+
+def _scenario_max_idle_s() -> float | None:
+    raw = os.environ.get("GUARDIAN_SCENARIO_MAX_IDLE_S", "").strip()
+    if not raw:
+        return None
+    try:
+        value = float(raw)
+    except ValueError:
+        return None
+    return value if value > 0 else None

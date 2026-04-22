@@ -115,3 +115,29 @@ def test_transaction_event_becomes_pending_instead_of_ingested(engine):
     assert pending is not None
     assert isinstance(pending, TransactionEvent)
     assert pending.amount_hkd == 5000
+
+
+def test_max_idle_env_caps_scenario_gaps(engine, monkeypatch):
+    monkeypatch.setenv("GUARDIAN_SCENARIO_MAX_IDLE_S", "1.5")
+    payload = {
+        "id": "accelerated_demo",
+        "label": "accelerated",
+        "category": "test",
+        "expected": {"intervention": "none"},
+        "events": [
+            {"t_seconds": 0, "type": "sms", "from": "Family", "body": "First"},
+            {"t_seconds": 10, "type": "sms", "from": "Family", "body": "Second"},
+        ],
+    }
+    scenario = Scenario.from_json(payload)
+    engine._cache[scenario.id] = scenario
+    engine._loaded_index = True
+    engine.play(scenario.id)
+
+    time.sleep(0.1)
+    engine.poll()
+    assert engine.state.progress > 0.0
+
+    time.sleep(1.6)
+    engine.poll()
+    assert engine.state.progress == 1.0

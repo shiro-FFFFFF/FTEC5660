@@ -35,7 +35,11 @@ def render() -> None:
 
     st.divider()
     st.subheader("Recent activity")
-    activity.render(event_log.entries, limit=6)
+    activity.render(
+        event_log.entries,
+        limit=6,
+        live_trace_store=live_trace_store,
+    )
 
 
 def _render_header(*, holder: str, risk_agent) -> None:

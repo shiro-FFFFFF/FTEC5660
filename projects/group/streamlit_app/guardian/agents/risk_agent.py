@@ -133,14 +133,26 @@ class RiskAgent:
         trace_callback: TraceCallback | None = None,
     ) -> RiskAssessment:
         started = time.monotonic()
+        if trace_callback is not None:
+            event = snapshot.triggering_event
+            trace_callback(
+                "SYSTEM",
+                "Risk assessment started",
+                f"{event.kind.value} event {event.id}",
+            )
+            trace_callback(
+                "THINKING",
+                "Computing fast-rule score from known scam signals",
+                None,
+            )
         fast = self._rule_score(snapshot)
         event = snapshot.triggering_event
         llm_requested = self._should_call_llm(event, fast.score)
         if trace_callback is not None:
             trace_callback(
-                "SYSTEM",
-                "Risk assessment started",
-                f"{event.kind.value} event {event.id}",
+                "OBSERVATION",
+                f"Fast-rule score computed: {fast.score:.2f}",
+                "; ".join(reason for reason in fast.reasons[:3]) or "No rule triggered.",
             )
 
         trace: list[ToolCallStep] = [
@@ -201,6 +213,12 @@ class RiskAgent:
                     llm_confidence=out.confidence,
                 ):
                     review_started = time.monotonic()
+                    if trace_callback is not None:
+                        trace_callback(
+                            "THINKING",
+                            "Running reviewer second opinion on the current assessment",
+                            None,
+                        )
                     reviewer = HeuristicLlmRuntime()
                     review = reviewer.score_risk(
                         snapshot=snapshot,
@@ -222,6 +240,12 @@ class RiskAgent:
                             *llm_reasons,
                             "AI agents disagree. Verify with a trusted contact before acting.",
                         ]
+                    if trace_callback is not None:
+                        trace_callback(
+                            "OBSERVATION",
+                            f"Reviewer returned risk {review.risk:.2f}",
+                            f"consensus={consensus}",
+                        )
                     trace.append(
                         _meta_trace(
                             tool="orchestrator_second_opinion",

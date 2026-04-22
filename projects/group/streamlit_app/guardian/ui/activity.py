@@ -13,10 +13,16 @@ from guardian.scenarios.events import (
     SmsEvent,
     TransactionEvent,
 )
+from guardian.ui.live_trace import LiveTraceStore
 from guardian.ui.widgets import fmt_hkd, relative_time, risk_chip
 
 
-def render(entries: Iterable[EventLogEntry], *, limit: int = 6) -> None:
+def render(
+    entries: Iterable[EventLogEntry],
+    *,
+    limit: int = 6,
+    live_trace_store: LiveTraceStore | None = None,
+) -> None:
     rows = list(entries)[-limit:][::-1]
     if not rows:
         st.info("No activity yet. Play a scenario from the sidebar or Home page.")
@@ -59,3 +65,30 @@ def render(entries: Iterable[EventLogEntry], *, limit: int = 6) -> None:
                 if entry.tags:
                     tag_pills = " ".join(f"`{t}`" for t in entry.tags[:3])
                     st.caption(tag_pills)
+            _render_trace(entry.event.id, live_trace_store)
+
+
+def _render_trace(event_id: str, live_trace_store: LiveTraceStore | None) -> None:
+    if live_trace_store is None:
+        return
+    trace = live_trace_store.get(event_id)
+    if trace is None:
+        return
+
+    rows = list(trace.get("rows", []))
+    if not rows:
+        return
+
+    status = str(trace.get("status", "running"))
+    label = f"Assessment trace · {len(rows)} step(s) · {status}"
+    with st.expander(label, expanded=False):
+        for row in rows:
+            tag = str(row.get("tag", "INFO"))
+            message = str(row.get("message", ""))
+            time = str(row.get("time", ""))
+            st.markdown(f"`[{tag}]` **{message}**")
+            if time:
+                st.caption(time)
+            detail = row.get("detail")
+            if detail:
+                st.code(str(detail), language="text")
