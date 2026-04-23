@@ -141,3 +141,36 @@ def test_max_idle_env_caps_scenario_gaps(engine, monkeypatch):
     time.sleep(1.6)
     engine.poll()
     assert engine.state.progress == 1.0
+
+
+def test_max_idle_releases_events_one_by_one_after_previous_finishes(engine, monkeypatch):
+    monkeypatch.setenv("GUARDIAN_SCENARIO_MAX_IDLE_S", "1.0")
+    payload = {
+        "id": "serial_accelerated_demo",
+        "label": "serial accelerated",
+        "category": "test",
+        "expected": {"intervention": "none"},
+        "events": [
+            {"t_seconds": 0, "type": "sms", "from": "Family", "body": "First"},
+            {"t_seconds": 10, "type": "sms", "from": "Family", "body": "Second"},
+            {"t_seconds": 20, "type": "sms", "from": "Family", "body": "Third"},
+        ],
+    }
+    scenario = Scenario.from_json(payload)
+    engine._cache[scenario.id] = scenario
+    engine._loaded_index = True
+    engine.play(scenario.id)
+
+    # Even if enough wall-clock time has passed to cover multiple capped gaps,
+    # the engine should only release one event per poll cycle.
+    time.sleep(2.2)
+    engine.poll()
+    assert engine._fired == {0}
+
+    time.sleep(1.1)
+    engine.poll()
+    assert engine._fired == {0, 1}
+
+    time.sleep(1.1)
+    engine.poll()
+    assert engine._fired == {0, 1, 2}

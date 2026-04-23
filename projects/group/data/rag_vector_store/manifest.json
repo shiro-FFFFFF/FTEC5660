@@ -1,0 +1,123 @@
+{
+  "generated_at": "2026-04-22T16:25:12.566117+00:00",
+  "knowledge_dir": "/Users/tommyshum/Documents/GitHub/FTEC5660-shiro/projects/group/data/rag_knowledge",
+  "docs_indexed": 18,
+  "chunks_indexed": 95,
+  "categories": [
+    "benign_patterns",
+    "scam_patterns",
+    "scenario_notes",
+    "tactics",
+    "transfer_guidance"
+  ],
+  "documents": [
+    {
+      "doc_id": "benign_patterns/family_transfer_normal",
+      "title": "Benign Pattern: Normal Family Transfer",
+      "category": "benign_patterns",
+      "source_path": "benign_patterns/family_transfer_normal.md"
+    },
+    {
+      "doc_id": "benign_patterns/utility_bill_payment_normal",
+      "title": "Benign Pattern: Utility Bill Payment",
+      "category": "benign_patterns",
+      "source_path": "benign_patterns/utility_bill_payment_normal.md"
+    },
+    {
+      "doc_id": "scam_patterns/fake_police_authority_impersonation",
+      "title": "Scam Pattern: Fake Police / Authority Impersonation",
+      "category": "scam_patterns",
+      "source_path": "scam_patterns/fake_police_authority_impersonation.md"
+    },
+    {
+      "doc_id": "scam_patterns/romance_investment_pig_butchering",
+      "title": "Scam Pattern: Romance / Investment Trust-Building Scam",
+      "category": "scam_patterns",
+      "source_path": "scam_patterns/romance_investment_pig_butchering.md"
+    },
+    {
+      "doc_id": "scam_patterns/sms_phishing_delivery_customs",
+      "title": "Scam Pattern: Delivery / Parcel / Customs Phishing",
+      "category": "scam_patterns",
+      "source_path": "scam_patterns/sms_phishing_delivery_customs.md"
+    },
+    {
+      "doc_id": "scam_patterns/urgent_transfer_pressure",
+      "title": "Scam Pattern: Urgent Transfer Pressure / Payment Redirection",
+      "category": "scam_patterns",
+      "source_path": "scam_patterns/urgent_transfer_pressure.md"
+    },
+    {
+      "doc_id": "scenario_notes/01_sms_phishing",
+      "title": "Scenario Note: 01_sms_phishing",
+      "category": "scenario_notes",
+      "source_path": "scenario_notes/01_sms_phishing.md"
+    },
+    {
+      "doc_id": "scenario_notes/02_voice_police",
+      "title": "Scenario Note: 02_voice_police",
+      "category": "scenario_notes",
+      "source_path": "scenario_notes/02_voice_police.md"
+    },
+    {
+      "doc_id": "scenario_notes/03_romance_investment",
+      "title": "Scenario Note: 03_romance_investment",
+      "category": "scenario_notes",
+      "source_path": "scenario_notes/03_romance_investment.md"
+    },
+    {
+      "doc_id": "scenario_notes/04_urgent_transfer",
+      "title": "Scenario Note: 04_urgent_transfer",
+      "category": "scenario_notes",
+      "source_path": "scenario_notes/04_urgent_transfer.md"
+    },
+    {
+      "doc_id": "scenario_notes/benign_01_family_transfer",
+      "title": "Scenario Note: benign_01_family_transfer",
+      "category": "scenario_notes",
+      "source_path": "scenario_notes/benign_01_family_transfer.md"
+    },
+    {
+      "doc_id": "scenario_notes/benign_02_utility_bill",
+      "title": "Scenario Note: benign_02_utility_bill",
+      "category": "scenario_notes",
+      "source_path": "scenario_notes/benign_02_utility_bill.md"
+    },
+    {
+      "doc_id": "tactics/authority_impersonation",
+      "title": "Tactic: Authority Impersonation",
+      "category": "tactics",
+      "source_path": "tactics/authority_impersonation.md"
+    },
+    {
+      "doc_id": "tactics/isolation_secrecy",
+      "title": "Tactic: Isolation / Secrecy",
+      "category": "tactics",
+      "source_path": "tactics/isolation_secrecy.md"
+    },
+    {
+      "doc_id": "tactics/payment_redirection",
+      "title": "Tactic: Payment Redirection",
+      "category": "tactics",
+      "source_path": "tactics/payment_redirection.md"
+    },
+    {
+      "doc_id": "tactics/urgency",
+      "title": "Tactic: Urgency",
+      "category": "tactics",
+      "source_path": "tactics/urgency.md"
+    },
+    {
+      "doc_id": "transfer_guidance/bank_transfer_beneficiary_checks",
+      "title": "Transfer Guidance: Bank Transfer Beneficiary Checks",
+      "category": "transfer_guidance",
+      "source_path": "transfer_guidance/bank_transfer_beneficiary_checks.md"
+    },
+    {
+      "doc_id": "transfer_guidance/contextual_transfer_risk",
+      "title": "Transfer Guidance: Contextual Transfer Risk",
+      "category": "transfer_guidance",
+      "source_path": "transfer_guidance/contextual_transfer_risk.md"
+    }
+  ]
+}

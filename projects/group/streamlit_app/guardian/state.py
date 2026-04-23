@@ -161,13 +161,14 @@ def _run_ambient_loop() -> None:
         engine.play(autoplay)
         st.session_state[_AUTOPLAY_KEY] = True
 
-    # Drive periodic reruns while a scenario is playing OR an intervention
-    # modal is waiting for its cool-off timer to tick down.
+    # Drive periodic reruns while scenario / assessment work is active.
+    # Avoid forcing full-app autorefresh just to update the intervention
+    # dialog countdown, because Streamlit dialogs are fragment-backed and
+    # repeated full reruns can produce stale-fragment warnings.
     intervention: InterventionAgent = st.session_state["intervention"]
     bank_assessment_running = _bank_transfer_assessment_running()
     if (
         engine.is_playing()
-        or intervention.state.pending is not None
         or bank_assessment_running
         or live_trace_store.has_running()
     ):

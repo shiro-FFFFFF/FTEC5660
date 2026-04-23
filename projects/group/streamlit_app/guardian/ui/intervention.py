@@ -128,9 +128,11 @@ def _intervention_dialog(*, pending_id: str, started_key: str) -> None:
             "Proceed after review",
             key=f"intv_proceed_{action.id}",
             type="primary",
-            disabled=remaining > 0,
             use_container_width=True,
         ):
+            if remaining > 0:
+                st.warning(f"Please wait {remaining}s before proceeding.")
+                return
             intervention.override_pending()
             st.rerun()
         return
@@ -141,10 +143,11 @@ def _intervention_dialog(*, pending_id: str, started_key: str) -> None:
         type="primary",
         use_container_width=True,
     ):
+        st.session_state["bank_transfer_cancelled_event_id"] = action.event_id
         intervention.resolve_pending()
         st.rerun()
 
-    override_disabled = (remaining > 0 and not is_delay) or is_delay
+    override_disabled = is_delay
     override_label = "Locked for 24h" if is_delay else "I am sure, proceed (PIN)"
     if cols[1].button(
         override_label,
@@ -152,6 +155,9 @@ def _intervention_dialog(*, pending_id: str, started_key: str) -> None:
         disabled=override_disabled,
         use_container_width=True,
     ):
+        if remaining > 0:
+            st.warning(f"Please wait {remaining}s before proceeding.")
+            return
         intervention.override_pending()
         st.rerun()
 

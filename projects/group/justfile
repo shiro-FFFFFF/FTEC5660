@@ -66,6 +66,12 @@ bank-mcp port="8766":
 play scenario:
     GUARDIAN_AUTOPLAY={{scenario}} {{streamlit}} run streamlit_app/app.py
 
+# Build the local RAG index from data/rag_knowledge using the current env config.
+# Example:
+# - just rag-build
+rag-build:
+    cd streamlit_app && ../{{python}} -m guardian.rag.build_index
+
 # Headless eval: every scenario through the risk pipeline. Exits non-zero on fail.
 eval:
     {{python}} streamlit_app/tools/eval.py

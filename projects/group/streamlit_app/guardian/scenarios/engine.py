@@ -90,7 +90,7 @@ class ScenarioEngine:
         self._started_wall: datetime | None = None
         self._fired: set[int] = set()
         self._completed_at: float | None = None
-        self._effective_offsets_seconds: dict[int, float] = {}
+        self._last_event_finished_monotonic: float | None = None
 
     # -- state accessors -----------------------------------------------------
 
@@ -141,7 +141,7 @@ class ScenarioEngine:
         self._started_wall = datetime.now()
         self._fired = set()
         self._completed_at = None
-        self._effective_offsets_seconds = _build_effective_offsets_seconds(scenario.events)
+        self._last_event_finished_monotonic = None
         log.info("[scenario] ▶ %s — %s", scenario.id, scenario.label)
 
     def poll(self) -> None:
@@ -149,56 +149,58 @@ class ScenarioEngine:
         scenario = self._state.playing
         if scenario is None or self._started_monotonic is None or self._started_wall is None:
             return
-        elapsed = time.monotonic() - self._started_monotonic
-        effective_total_seconds = max(self._effective_offsets_seconds.values(), default=0.0)
+        if self._state.pending_user_transaction is not None:
+            return
+
+        now_monotonic = time.monotonic()
         total_seconds = max(
             (e.offset.total_seconds() for e in scenario.events),
             default=0.0,
         )
-        for scheduled in scenario.events:
-            if scheduled.index in self._fired:
-                continue
-            effective_offset_seconds = self._effective_offsets_seconds.get(
-                scheduled.index,
-                scheduled.offset.total_seconds(),
+        scheduled = next((event for event in scenario.events if event.index not in self._fired), None)
+        if scheduled is not None:
+            due_at = _due_monotonic_for(
+                scheduled=scheduled,
+                started_monotonic=self._started_monotonic,
+                last_event_finished_monotonic=self._last_event_finished_monotonic,
             )
-            if effective_offset_seconds > elapsed:
-                continue
-            self._fired.add(scheduled.index)
-            ts = self._started_wall + scheduled.offset
-            event_id = f"{scenario.id}_{scheduled.index}"
-            event = event_from_json(scheduled.payload, ts, event_id)
-            if isinstance(event, TransactionEvent):
-                log.info(
-                    "[scenario] @%ds ⏸ await user txn (HKD %.0f → %s)",
-                    int(scheduled.offset.total_seconds()),
-                    event.amount_hkd,
-                    event.to_name,
+            if due_at <= now_monotonic:
+                self._fired.add(scheduled.index)
+                ts = self._started_wall + scheduled.offset
+                event_id = f"{scenario.id}_{scheduled.index}"
+                event = event_from_json(scheduled.payload, ts, event_id)
+                if isinstance(event, TransactionEvent):
+                    log.info(
+                        "[scenario] @%ds ⏸ await user txn (HKD %.0f → %s)",
+                        int(scheduled.offset.total_seconds()),
+                        event.amount_hkd,
+                        event.to_name,
+                    )
+                    self._state = ScenarioState(
+                        playing=self._state.playing,
+                        progress=self._state.progress,
+                        completed=self._state.completed,
+                        pending_user_transaction=event,
+                    )
+                else:
+                    log.info(
+                        "[scenario] @%ds → %s",
+                        int(scheduled.offset.total_seconds()),
+                        event.kind.value,
+                    )
+                    self._context.ingest(event)
+                self._last_event_finished_monotonic = time.monotonic()
+                progress = (
+                    (scheduled.offset.total_seconds() + 1) / (total_seconds + 1)
+                    if total_seconds
+                    else 1.0
                 )
                 self._state = ScenarioState(
                     playing=self._state.playing,
-                    progress=self._state.progress,
+                    progress=max(self._state.progress, min(1.0, progress)),
                     completed=self._state.completed,
-                    pending_user_transaction=event,
+                    pending_user_transaction=self._state.pending_user_transaction,
                 )
-            else:
-                log.info(
-                    "[scenario] @%ds → %s",
-                    int(scheduled.offset.total_seconds()),
-                    event.kind.value,
-                )
-                self._context.ingest(event)
-            progress = (
-                (effective_offset_seconds + 1) / (effective_total_seconds + 1)
-                if effective_total_seconds
-                else 1.0
-            )
-            self._state = ScenarioState(
-                playing=self._state.playing,
-                progress=max(self._state.progress, min(1.0, progress)),
-                completed=self._state.completed,
-                pending_user_transaction=self._state.pending_user_transaction,
-            )
         if len(self._fired) == len(scenario.events):
             # Completed all scheduled events. Mark completion + auto-clear
             # after a short grace period if no transaction is pending.
@@ -242,7 +244,7 @@ class ScenarioEngine:
             )
             self._started_monotonic = None
             self._started_wall = None
-            self._effective_offsets_seconds = {}
+            self._last_event_finished_monotonic = None
 
     def stop(self) -> None:
         self._state = ScenarioState(completed=self._state.completed)
@@ -250,25 +252,21 @@ class ScenarioEngine:
         self._started_wall = None
         self._fired = set()
         self._completed_at = None
-        self._effective_offsets_seconds = {}
+        self._last_event_finished_monotonic = None
 
 
-def _build_effective_offsets_seconds(events: list[ScheduledEvent]) -> dict[int, float]:
+def _due_monotonic_for(
+    *,
+    scheduled: ScheduledEvent,
+    started_monotonic: float,
+    last_event_finished_monotonic: float | None,
+) -> float:
+    actual_due = started_monotonic + scheduled.offset.total_seconds()
     max_idle_s = _scenario_max_idle_s()
-    if max_idle_s is None:
-        return {event.index: event.offset.total_seconds() for event in events}
-
-    effective_offsets: dict[int, float] = {}
-    previous_actual = 0.0
-    previous_effective = 0.0
-    for event in events:
-        actual = event.offset.total_seconds()
-        gap = max(0.0, actual - previous_actual)
-        effective_gap = min(gap, max_idle_s)
-        previous_effective += effective_gap
-        effective_offsets[event.index] = previous_effective
-        previous_actual = actual
-    return effective_offsets
+    if max_idle_s is None or last_event_finished_monotonic is None:
+        return actual_due
+    accelerated_due = last_event_finished_monotonic + max_idle_s
+    return min(actual_due, accelerated_due)
 
 
 def _scenario_max_idle_s() -> float | None:

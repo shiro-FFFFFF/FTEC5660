@@ -13,10 +13,11 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from langchain_core.tools import StructuredTool
+from langchain_core.tools import BaseTool, StructuredTool
 from pydantic import BaseModel, Field, create_model
 
 from guardian.data.scam_signals import ScamSignalProvider
+from guardian.rag.tools import retrieve_scam_patterns, retrieve_transfer_guidance
 from guardian.scenarios.events import (
     CallEvent,
     ChatEvent,
@@ -248,11 +249,45 @@ def build_default_tool_registry(
                             "description": "Tag for the appended blocklist row.",
                         },
                     },
-                    "required": ["number", "risk", "reason", "event_id", "source_model"],
+                    "required": [
+                        "number",
+                        "risk",
+                        "reason",
+                        "event_id",
+                        "source_model",
+                    ],
                 },
                 trace=trace,
                 trace_callback=trace_callback,
                 call=lambda args: _update_scamdatabase_number(provider, args),
+            ),
+            _instrument_langchain_tool(
+                tool=retrieve_scam_patterns,
+                description=(
+                    "Retrieve anti-scam knowledge-base matches for SMS, call, chat, or "
+                    "general scam-pattern analysis. Accepted params: query (required "
+                    "string), top_k (optional small integer), category_filter "
+                    "(optional one of scam_patterns, benign_patterns, tactics, "
+                    "scenario_notes). Use this to retrieve scam narratives, tactics, "
+                    "or benign look-alikes from local RAG. Do not use it for bank "
+                    "beneficiary account/name checks."
+                ),
+                trace=trace,
+                trace_callback=trace_callback,
+            ),
+            _instrument_langchain_tool(
+                tool=retrieve_transfer_guidance,
+                description=(
+                    "Retrieve local RAG guidance for bank transfer review. Accepted "
+                    "params: query (required string describing the transfer context), "
+                    "top_k (optional small integer), category_filter (optional, "
+                    "usually omitted). Use this for transfer-risk context such as "
+                    "new recipient, urgency, recent suspicious call/SMS, beneficiary "
+                    "mismatch, or prior beneficiary risk. Do not use it for domain "
+                    "checks or phone-number checks."
+                ),
+                trace=trace,
+                trace_callback=trace_callback,
             ),
         ],
         trace=trace,
@@ -298,6 +333,48 @@ def _make_tool(
         name=name,
         description=description,
         args_schema=args_schema,
+    )
+
+
+def _instrument_langchain_tool(
+    *,
+    tool: BaseTool,
+    description: str,
+    trace: list[ToolCallStep],
+    trace_callback: TraceCallback | None,
+) -> StructuredTool:
+    def call_tool(**kwargs: Any) -> str:
+        _emit(
+            trace_callback,
+            "ACTION",
+            f"Calling {tool.name}",
+            json.dumps(kwargs, indent=2),
+        )
+        step = _timed_call(
+            name=tool.name,
+            args=dict(kwargs),
+            call=lambda args: tool.invoke(args),
+        )
+        trace.append(step)
+        _emit(
+            trace_callback,
+            "OBSERVATION",
+            f"{tool.name} returned in {step.latency_ms} ms",
+            json.dumps(step.result, indent=2),
+        )
+        _emit(
+            trace_callback,
+            "THINKING",
+            "Reviewing the tool result and deciding the next step",
+            None,
+        )
+        return json.dumps(step.result)
+
+    return StructuredTool.from_function(
+        func=call_tool,
+        name=tool.name,
+        description=description,
+        args_schema=tool.args_schema,
     )
 
 
