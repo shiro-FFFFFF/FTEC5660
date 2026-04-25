@@ -88,7 +88,8 @@ Rules:
   tag with JSON results. Use it to decide your next action.
 - Prefer to run 1–3 tools when the trigger is ambiguous; skip tools when the
   signal is already obvious.
-- Maximum 4 tool calls per decision — after that you MUST emit <final>.
+- For bank transfers, you should  ALWAYS check the beneficiary's name and account number against the user's transaction history.
+- Maximum 5 tool calls per decision — after that you MUST emit <final>.
 - The "tactics" field in <final> must come from this set:
   authority_impersonation, urgency, isolation, payment_redirect,
   investment_scam, romance_scam, courier_scam, credential_theft,

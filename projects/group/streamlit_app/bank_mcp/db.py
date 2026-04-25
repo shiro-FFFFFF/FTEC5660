@@ -94,15 +94,21 @@ class BankReviewRepository:
                     (account_hash,),
                 ).fetchone()
                 if registry_row is None:
-                    return BeneficiaryCheckResult("unknown", self._risk_status(conn, account_hash))
+                    return BeneficiaryCheckResult(
+                        "unknown", self._risk_status(conn, account_hash)
+                    )
 
                 if registry_row["account_status"] != "active":
-                    return BeneficiaryCheckResult("unknown", self._risk_status(conn, account_hash))
+                    return BeneficiaryCheckResult(
+                        "unknown", self._risk_status(conn, account_hash)
+                    )
 
                 aliases = _parse_alias_json(registry_row["alias_names_json"])
                 name_check = classify_name_match(
                     recipient_name,
-                    registry_row["official_name_norm"] or registry_row["official_name_raw"] or "",
+                    registry_row["official_name_norm"]
+                    or registry_row["official_name_raw"]
+                    or "",
                     aliases,
                 )
                 risk_status = self._risk_status(conn, account_hash)
@@ -182,13 +188,21 @@ class BankReviewRepository:
                 )
                 conn.commit()
                 report_id = str(cursor.lastrowid or "")
-                log.info("Accepted bank transfer risk report %s for %s", report_id, account_masked)
+                log.info(
+                    "Accepted bank transfer risk report %s for %s",
+                    report_id,
+                    account_masked,
+                )
                 return ReportResult("accepted", report_id)
         except sqlite3.IntegrityError:
             log.info("Duplicate bank transfer report blocked for %s", account_masked)
             return ReportResult("duplicate", "")
         except sqlite3.Error as exc:
-            log.exception("Failed to record bank transfer risk report for %s: %s", account_masked, exc)
+            log.exception(
+                "Failed to record bank transfer risk report for %s: %s",
+                account_masked,
+                exc,
+            )
             return ReportResult("error", "")
 
     def connect(self) -> sqlite3.Connection:
@@ -198,7 +212,9 @@ class BankReviewRepository:
         return conn
 
     def _seed_if_empty(self, conn: sqlite3.Connection) -> None:
-        existing = conn.execute("SELECT COUNT(*) AS count FROM beneficiary_registry").fetchone()
+        existing = conn.execute(
+            "SELECT COUNT(*) AS count FROM beneficiary_registry"
+        ).fetchone()
         if existing and int(existing["count"]) > 0:
             return
 
@@ -221,6 +237,12 @@ class BankReviewRepository:
                 "official_name_raw": "HARBOUR VIEW TRADING LTD",
                 "bank_code": "388",
                 "aliases": ["HARBOUR VIEW TRADING", "HARBOURVIEW TRADING LTD"],
+            },
+            {
+                "account_number": "012-345678-999",
+                "official_name_raw": "Unknown Ltd",
+                "bank_code": "999",
+                "aliases": ["unknown", "unknown ltd"],
             },
         ]
         for row in registry_rows:
@@ -273,6 +295,15 @@ class BankReviewRepository:
                 "reason_code": "customer_dispute",
                 "severity": "medium",
                 "case_id": "CASE-2002",
+                "created_by": "seed",
+            },
+            {
+                "account_number": "012-345678-999",
+                "recipient_name": "Unknown Ltd",
+                "reason_code": "suspected_scam",
+                "reason_code": "confirmed_fraud",
+                "severity": "high",
+                "case_id": "CASE-2003",
                 "created_by": "seed",
             },
         ]
