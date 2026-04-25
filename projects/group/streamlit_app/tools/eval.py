@@ -166,6 +166,8 @@ def _compat(actual: InterventionLevel, expected: str) -> bool:
         return actual is InterventionLevel.NONE
     if expected == "banner":
         return actual is InterventionLevel.BANNER
+    if expected == "manual_review":
+        return actual is InterventionLevel.MANUAL_REVIEW
     if expected == "full_screen":
         return actual in (InterventionLevel.FULL_SCREEN, InterventionLevel.DELAY)
     if expected == "full_screen_delay":

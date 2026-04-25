@@ -32,13 +32,14 @@ def engine():
     return ScenarioEngine(context=context, scenarios_dir=SCENARIOS_DIR)
 
 
-def test_list_scenarios_discovers_six(engine):
+def test_list_scenarios_discovers_seven(engine):
     scenarios = engine.list_scenarios()
     ids = {s.id for s in scenarios}
     assert "01_sms_phishing" in ids
     assert "02_voice_police" in ids
     assert "03_romance_investment" in ids
     assert "04_urgent_transfer" in ids
+    assert "06_multiple_manual_transfer" in ids
     assert "benign_01_family_transfer" in ids
     assert "benign_02_utility_bill" in ids
 

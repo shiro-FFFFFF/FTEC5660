@@ -1,0 +1,39 @@
+{
+  "id": "06_multiple_manual_transfer",
+  "label": "Multiple manual transfers across clean, reported, and high-risk beneficiaries",
+  "category": "bank_transfer_review",
+  "expected": {
+    "intervention": "full_screen",
+    "min_risk": 0.75,
+    "max_risk": 1.0
+  },
+  "events": [
+    {
+      "t_seconds": 0,
+      "type": "transaction_attempt",
+      "amount_hkd": 2000,
+      "to_name": "APEX SOLUTIONS LIMITED",
+      "to_account": "123-456-789-001",
+      "new_recipient": false,
+      "channel": "manual_transfer"
+    },
+    {
+      "t_seconds": 45,
+      "type": "transaction_attempt",
+      "amount_hkd": 12000,
+      "to_name": "CHAN TAI MAN COMPANY LIMITED",
+      "to_account": "987-654-321-002",
+      "new_recipient": false,
+      "channel": "manual_transfer"
+    },
+    {
+      "t_seconds": 90,
+      "type": "transaction_attempt",
+      "amount_hkd": 8000,
+      "to_name": "HARBOUR VIEW TRADING LTD",
+      "to_account": "555-666-777-003",
+      "new_recipient": true,
+      "channel": "manual_transfer"
+    }
+  ]
+}

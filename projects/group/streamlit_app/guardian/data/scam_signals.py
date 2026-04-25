@@ -12,13 +12,17 @@ from __future__ import annotations
 import asyncio
 import csv
 import json
+import logging
 from abc import ABC, abstractmethod
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from bank_mcp.db import BankReviewRepository
 from guardian.data.scam_db import ScamDatabase, ScamEntry, ScamEntryType
 from guardian.paths import SCAM_DB_RUNTIME_CSV
+
+log = logging.getLogger(__name__)
 
 
 class ScamSignalProvider(ABC):
@@ -68,6 +72,11 @@ class ScamDbProvider(ScamSignalProvider):
     def __init__(self, db: ScamDatabase, runtime_csv: Path = SCAM_DB_RUNTIME_CSV) -> None:
         self._db = db
         self._runtime_csv = Path(runtime_csv)
+        self._bank_review = BankReviewRepository()
+        try:
+            self._bank_review.initialize()
+        except RuntimeError as exc:
+            log.warning("bank review fallback unavailable: %s", exc)
 
     def lookup_number(self, number: str) -> dict[str, Any]:
         raw = (number or "").lower()
@@ -124,12 +133,13 @@ class ScamDbProvider(ScamSignalProvider):
         recipient_name: str,
         account_number: str,
     ) -> dict[str, Any]:
-        return {
-            "name_account_check": "unknown",
-            "reported_risk_status": "unknown",
-            "source": "local",
-            "fallback": "bank_review_unavailable",
-        }
+        result = self._bank_review.check_beneficiary(
+            recipient_name=recipient_name,
+            account_number=account_number,
+        )
+        out = result.to_dict()
+        out["source"] = "local_bank_review"
+        return out
 
     def report_beneficiary_risk_for_bank_transfer(
         self,
@@ -139,12 +149,17 @@ class ScamDbProvider(ScamSignalProvider):
         recipient_name: str | None = None,
         case_id: str | None = None,
     ) -> dict[str, Any]:
-        return {
-            "status": "rejected",
-            "report_id": "",
-            "source": "local",
-            "fallback": "bank_review_unavailable",
-        }
+        result = self._bank_review.report_beneficiary_risk(
+            account_number=account_number,
+            recipient_name=recipient_name,
+            reason_code=reason_code,
+            case_id=case_id,
+            source_type="local_fallback",
+            created_by="scam_signals_local",
+        )
+        out = result.to_dict()
+        out["source"] = "local_bank_review"
+        return out
 
     def update_scamdatabase_number(
         self,

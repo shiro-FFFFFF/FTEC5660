@@ -110,6 +110,55 @@ def test_police_call_followed_by_transfer_escalates_to_delay(pipeline):
     assert intervention.state.pending.level == InterventionLevel.DELAY
 
 
+def test_multiple_manual_transfers_cover_no_medium_and_high_risk(pipeline):
+    context, risk, intervention, _ = pipeline
+    now = datetime.now()
+
+    context.ingest(
+        TransactionEvent(
+            id="clean_beneficiary_transfer",
+            timestamp=now,
+            amount_hkd=2_000,
+            to_name="APEX SOLUTIONS LIMITED",
+            to_account="123-456-789-001",
+            new_recipient=False,
+            channel="manual_transfer",
+        )
+    )
+    low = risk.assessments[-1]
+    assert low.final_risk < 0.3
+
+    context.ingest(
+        TransactionEvent(
+            id="reported_beneficiary_transfer",
+            timestamp=now + timedelta(seconds=45),
+            amount_hkd=12_000,
+            to_name="CHAN TAI MAN COMPANY LIMITED",
+            to_account="987-654-321-002",
+            new_recipient=False,
+            channel="manual_transfer",
+        )
+    )
+    medium = risk.assessments[-1]
+    assert 0.3 <= medium.final_risk < 0.6
+
+    context.ingest(
+        TransactionEvent(
+            id="high_risk_beneficiary_transfer",
+            timestamp=now + timedelta(seconds=90),
+            amount_hkd=8_000,
+            to_name="HARBOUR VIEW TRADING LTD",
+            to_account="555-666-777-003",
+            new_recipient=True,
+            channel="manual_transfer",
+        )
+    )
+    high = risk.assessments[-1]
+    assert high.final_risk >= 0.6
+    assert intervention.state.pending is not None
+    assert intervention.state.pending.level == InterventionLevel.FULL_SCREEN
+
+
 def test_event_log_annotation_persists(pipeline):
     context, risk, intervention, event_log = pipeline
     context.ingest(
